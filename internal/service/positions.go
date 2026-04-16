@@ -221,4 +221,9 @@ func (s *Service) processSDSForPosition(sourceISSI uint32, sdsData []byte) {
 		fmt.Sprintf("ISSI=%d lat=%.4f lon=%.4f", sourceISSI, lat, lon),
 		map[string]any{"issi": sourceISSI, "lat": lat, "lon": lon},
 	)
+
+	// Forward to APRS-IS
+	if s.aprsBridge != nil {
+		go s.aprsBridge.SendPosition(sourceISSI, lat, lon)
+	}
 }

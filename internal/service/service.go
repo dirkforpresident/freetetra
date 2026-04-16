@@ -47,6 +47,7 @@ type Service struct {
 
 	federation    *federationBridge
 	positionStore *PositionStore
+	aprsBridge    *APRSBridge
 }
 
 type activeCall struct {
@@ -95,6 +96,15 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.initBuiltInVirtualSDSRoutes()
+
+	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {
+		passcode := cfg.APRS.Passcode
+		if passcode == "" {
+			passcode = aprsPasscode(cfg.APRS.Callsign)
+		}
+		s.aprsBridge = newAPRSBridge(logger, cfg.APRS.Callsign, passcode)
+		logger.Printf("APRS-IS: enabled as %s (passcode %s) server %s", cfg.APRS.Callsign, passcode, cfg.APRS.Server)
+	}
 
 	if cfg.Federation.Enabled && cfg.Federation.Name != "" {
 		s.federation = newFederationBridge(cfg, logger, s)

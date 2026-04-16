@@ -21,6 +21,7 @@ type Config struct {
 	WebRadio WebRadioConfig
 	Zello    ZelloConfig
 	Echo       EchoConfig
+	APRS       APRSConfig
 	MOTD       MOTDConfig
 	SIP        SIPConfig
 	Federation FederationConfig
@@ -54,6 +55,13 @@ type SIPConfig struct {
 	ReconnectDelay     time.Duration
 	ReleaseCause       uint8
 	InboundDefaultISSI uint32
+}
+
+type APRSConfig struct {
+	Enabled  bool
+	Callsign string
+	Passcode string
+	Server   string
 }
 
 type FederationConfig struct {
@@ -263,6 +271,12 @@ func LoadFromEnv() (Config, error) {
 			ReconnectDelay:          envDuration("ZELLO_RECONNECT_DELAY", 5*time.Second),
 			PingInterval:            envDuration("ZELLO_PING_INTERVAL", 10*time.Second),
 			ResponseTimeout:         envDuration("ZELLO_RESPONSE_TIMEOUT", 10*time.Second),
+		},
+		APRS: APRSConfig{
+			Enabled:  envBool("APRS_ENABLED", false),
+			Callsign: env("APRS_CALLSIGN", ""),
+			Passcode: env("APRS_PASSCODE", ""),
+			Server:   env("APRS_SERVER", "euro.aprs2.net:14580"),
 		},
 		MOTD: MOTDConfig{
 			Enabled: envBool("MOTD_ENABLED", false),
