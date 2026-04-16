@@ -45,7 +45,8 @@ type Service struct {
 	sdsRouteHintMu sync.RWMutex
 	sdsRouteHints  map[uint32]sdsRouteHint
 
-	federation *federationBridge
+	federation    *federationBridge
+	positionStore *PositionStore
 }
 
 type activeCall struct {
@@ -89,8 +90,10 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 		}
 		s.motdStore = store
 	}
+	s.positionStore = newPositionStore(logger)
 	s.server = brew.NewServer(cfg, logger, s)
 	s.registerDashboardHandlers()
+	s.registerPositionHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.Federation.Enabled && cfg.Federation.Name != "" {
@@ -410,6 +413,11 @@ func (s *Service) onVoiceFrameFromClient(client *brew.Client, m *brew.FrameMessa
 	payload := env.Payload
 	source := env.Source
 	dest := env.Destination
+
+	// Check for LIP position reports
+	if m.FrameType == brew.FrameTypeSDSTransfer && source != 0 && len(payload) > 0 {
+		s.processSDSForPosition(source, payload)
+	}
 
 	// Managed callout mode:
 	// if a subscriber sends plain text SDS while a callout is active for its group,
