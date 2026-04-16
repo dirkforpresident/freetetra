@@ -21,6 +21,7 @@ type Config struct {
 	WebRadio WebRadioConfig
 	Zello    ZelloConfig
 	Echo       EchoConfig
+	RadioID    RadioIDConfig
 	APRS       APRSConfig
 	MOTD       MOTDConfig
 	SIP        SIPConfig
@@ -55,6 +56,11 @@ type SIPConfig struct {
 	ReconnectDelay     time.Duration
 	ReleaseCause       uint8
 	InboundDefaultISSI uint32
+}
+
+type RadioIDConfig struct {
+	AuthEnabled bool   // Auto-authenticate via RadioID API
+	SharedKey   string // Shared password for all RadioID-verified users
 }
 
 type APRSConfig struct {
@@ -271,6 +277,10 @@ func LoadFromEnv() (Config, error) {
 			ReconnectDelay:          envDuration("ZELLO_RECONNECT_DELAY", 5*time.Second),
 			PingInterval:            envDuration("ZELLO_PING_INTERVAL", 10*time.Second),
 			ResponseTimeout:         envDuration("ZELLO_RESPONSE_TIMEOUT", 10*time.Second),
+		},
+		RadioID: RadioIDConfig{
+			AuthEnabled: envBool("RADIOID_AUTH_ENABLED", false),
+			SharedKey:   env("RADIOID_SHARED_KEY", ""),
 		},
 		APRS: APRSConfig{
 			Enabled:  envBool("APRS_ENABLED", false),

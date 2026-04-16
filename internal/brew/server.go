@@ -25,6 +25,11 @@ type EventHandler interface {
 	OnMessage(client *Client, msg ParsedMessage)
 }
 
+// AuthVerifier is called to check if a username/password combination is valid.
+// If set, it replaces the static username/password check from config.
+// Returns true if the user is allowed to connect.
+type AuthVerifier func(username, password string) bool
+
 type Server struct {
 	cfg     config.Config
 	logger  *log.Logger
@@ -43,6 +48,7 @@ type Server struct {
 	tokens  map[string]time.Time
 
 	extraHandlers []httpHandlerRegistration
+	authVerifier  AuthVerifier
 }
 
 type httpHandlerRegistration struct {
@@ -363,8 +369,14 @@ func (s *Server) snapshotClients() []*Client {
 	return out
 }
 
+// SetAuthVerifier sets a custom auth verifier function.
+// When set, any username is accepted if the verifier returns true.
+func (s *Server) SetAuthVerifier(v AuthVerifier) {
+	s.authVerifier = v
+}
+
 func (s *Server) authEnabled() bool {
-	return strings.TrimSpace(s.cfg.Server.Username) != "" || strings.TrimSpace(s.cfg.Server.Password) != ""
+	return s.authVerifier != nil || strings.TrimSpace(s.cfg.Server.Username) != "" || strings.TrimSpace(s.cfg.Server.Password) != ""
 }
 
 func (s *Server) authorizeRequest(r *http.Request) bool {
@@ -373,10 +385,9 @@ func (s *Server) authorizeRequest(r *http.Request) bool {
 		return false
 	}
 	params := parseDigestHeader(header)
-	if params["username"] != s.cfg.Server.Username {
-		return false
-	}
-	if params["realm"] != s.cfg.Server.Realm {
+	username := params["username"]
+	realm := params["realm"]
+	if realm != s.cfg.Server.Realm {
 		return false
 	}
 
@@ -390,6 +401,54 @@ func (s *Server) authorizeRequest(r *http.Request) bool {
 	qop := params["qop"]
 	nc := params["nc"]
 	cnonce := params["cnonce"]
+
+	// If custom auth verifier is set, try all possible passwords
+	if s.authVerifier != nil {
+		// We need to find the password that matches the digest.
+		// The verifier tells us if the username is valid.
+		// For RadioID auth, we use a shared key as password.
+		// Try the shared key from config first, then the static password.
+		passwords := []string{}
+		if s.cfg.Server.Password != "" {
+			passwords = append(passwords, s.cfg.Server.Password)
+		}
+		if username == s.cfg.Server.Username && s.cfg.Server.Password != "" {
+			// Static user always uses static password
+			ha1 := md5Hex(fmt.Sprintf("%s:%s:%s", username, s.cfg.Server.Realm, s.cfg.Server.Password))
+			ha2 := md5Hex(fmt.Sprintf("%s:%s", r.Method, uri))
+			var expected string
+			if qop != "" {
+				expected = md5Hex(fmt.Sprintf("%s:%s:%s:%s:%s:%s", ha1, nonce, nc, cnonce, qop, ha2))
+			} else {
+				expected = md5Hex(fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+			}
+			if subtle.ConstantTimeCompare([]byte(strings.ToLower(response)), []byte(strings.ToLower(expected))) == 1 {
+				return true
+			}
+		}
+
+		// For dynamic users, verify the digest with each known password
+		for _, pw := range passwords {
+			ha1 := md5Hex(fmt.Sprintf("%s:%s:%s", username, s.cfg.Server.Realm, pw))
+			ha2 := md5Hex(fmt.Sprintf("%s:%s", r.Method, uri))
+			var expected string
+			if qop != "" {
+				expected = md5Hex(fmt.Sprintf("%s:%s:%s:%s:%s:%s", ha1, nonce, nc, cnonce, qop, ha2))
+			} else {
+				expected = md5Hex(fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+			}
+			if subtle.ConstantTimeCompare([]byte(strings.ToLower(response)), []byte(strings.ToLower(expected))) == 1 {
+				// Digest matches — now verify username with RadioID
+				return s.authVerifier(username, pw)
+			}
+		}
+		return false
+	}
+
+	// Static auth: single username/password from config
+	if username != s.cfg.Server.Username {
+		return false
+	}
 
 	ha1 := md5Hex(fmt.Sprintf("%s:%s:%s", s.cfg.Server.Username, s.cfg.Server.Realm, s.cfg.Server.Password))
 	ha2 := md5Hex(fmt.Sprintf("%s:%s", r.Method, uri))

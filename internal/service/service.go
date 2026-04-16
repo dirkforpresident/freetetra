@@ -48,6 +48,7 @@ type Service struct {
 	federation    *federationBridge
 	positionStore *PositionStore
 	aprsBridge    *APRSBridge
+	radioIDAuth   *RadioIDAuth
 }
 
 type activeCall struct {
@@ -93,9 +94,30 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	}
 	s.positionStore = newPositionStore(logger)
 	s.server = brew.NewServer(cfg, logger, s)
+
+	if cfg.RadioID.AuthEnabled {
+		s.radioIDAuth = newRadioIDAuth(logger)
+		sharedKey := cfg.RadioID.SharedKey
+		if sharedKey == "" {
+			sharedKey = cfg.Server.Password
+		}
+		s.server.SetAuthVerifier(func(username, password string) bool {
+			// Parse ISSI from username (BlueStation sends ISSI as username)
+			var issi uint32
+			fmt.Sscanf(username, "%d", &issi)
+			if issi == 0 {
+				return false
+			}
+			_, allowed := s.radioIDAuth.Verify(issi)
+			return allowed
+		})
+		logger.Printf("RadioID: auto-auth enabled (shared key configured)")
+	}
+
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.registerPublicHandlers()
+	s.registerRadioIDHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {
