@@ -95,6 +95,7 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	s.server = brew.NewServer(cfg, logger, s)
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
+	s.registerPublicHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {
