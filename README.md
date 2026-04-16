@@ -143,7 +143,7 @@ das alle User in ihrer BlueStation-Config eintragen.
 ```env
 FEDERATION_ENABLED=true
 FEDERATION_NAME=DO0RAM                  # Name dieses Servers
-FEDERATION_KEY=shared-secret            # Schluessel fuer Peer-Auth
+FEDERATION_KEY=blafablafa            # Schluessel fuer Peer-Auth
 FEDERATION_PEERS=wss://brew.example.com/peer/,wss://other.de/peer/
 ```
 
