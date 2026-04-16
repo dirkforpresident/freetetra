@@ -195,6 +195,7 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 	currentCallID := callID
 	activeCallID := uuid.Nil
 	callStarted := false
+	frameInCall := 0
 
 	for {
 		if ctx.Err() != nil {
@@ -222,7 +223,19 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 			}
 			callStarted = true
 			activeCallID = currentCallID
+			frameInCall = 0
 			b.logger.Printf("webradio call started on tg=%d call=%s", b.cfg.WebRadio.Talkgroup, currentCallID.String())
+		}
+
+		// Periodically release and restart call to stay within TETRA group call model
+		frameInCall++
+		if frameInCall >= 500 { // ~15 seconds
+			b.plane.IdleInjectedCall("webradio", currentCallID, b.cfg.WebRadio.ReleaseCause)
+			callStarted = false
+			activeCallID = uuid.Nil
+			currentCallID = uuid.New()
+			frameInCall = 0
+			continue
 		}
 
 		b.plane.InjectedVoiceFrame("webradio", currentCallID, ste)
