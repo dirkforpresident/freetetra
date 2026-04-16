@@ -1,0 +1,1155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TETRA Brew Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.6.8/dist/vuetify.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --tb-bg: #081318;
+      --tb-bg-soft: #10222b;
+      --tb-panel: rgba(11, 28, 38, 0.82);
+      --tb-panel-strong: rgba(9, 23, 32, 0.94);
+      --tb-line: rgba(138, 188, 211, 0.18);
+      --tb-text: #edf6fb;
+      --tb-muted: #a7beca;
+      --tb-accent: #f3b34c;
+      --tb-accent-2: #59d0ff;
+      --tb-danger: #ef6f59;
+      --tb-ok: #4dd39a;
+    }
+
+    html, body, #app {
+      min-height: 100%;
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(89, 208, 255, 0.14), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(243, 179, 76, 0.18), transparent 24%),
+        linear-gradient(160deg, #050d11 0%, #081318 45%, #0a1a21 100%);
+      color: var(--tb-text);
+      font-family: "Space Grotesk", sans-serif;
+    }
+
+    .tb-shell {
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.02), transparent 20%),
+        repeating-linear-gradient(
+          120deg,
+          rgba(255,255,255,0.015) 0,
+          rgba(255,255,255,0.015) 1px,
+          transparent 1px,
+          transparent 72px
+        );
+    }
+
+    .tb-topbar {
+      backdrop-filter: blur(18px);
+      background: rgba(7, 18, 24, 0.78) !important;
+      border-bottom: 1px solid var(--tb-line);
+    }
+
+    .tb-hero,
+    .tb-card {
+      border: 1px solid var(--tb-line);
+      background: var(--tb-panel);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(14px);
+    }
+
+    .tb-hero {
+      overflow: hidden;
+      position: relative;
+      background:
+        radial-gradient(circle at top right, rgba(243, 179, 76, 0.18), transparent 28%),
+        radial-gradient(circle at 20% 15%, rgba(89, 208, 255, 0.14), transparent 24%),
+        var(--tb-panel-strong);
+    }
+
+    .tb-hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -10% -35% auto;
+      width: 320px;
+      height: 320px;
+      background: radial-gradient(circle, rgba(89, 208, 255, 0.18), transparent 62%);
+      pointer-events: none;
+    }
+
+    .tb-eyebrow {
+      font-size: 0.78rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--tb-accent-2);
+      margin-bottom: 12px;
+    }
+
+    .tb-headline {
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      line-height: 1;
+      font-weight: 700;
+      max-width: 11ch;
+      margin: 0 0 10px;
+    }
+
+    .tb-muted {
+      color: var(--tb-muted);
+    }
+
+    .tb-kpis {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .tb-kpi {
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(255,255,255,0.025);
+    }
+
+    .tb-kpi-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--tb-muted);
+      margin-bottom: 10px;
+    }
+
+    .tb-kpi-value {
+      font-size: clamp(1.5rem, 3vw, 2.2rem);
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .tb-kpi-sub {
+      margin-top: 8px;
+      font-size: 0.85rem;
+      color: var(--tb-muted);
+    }
+
+    .tb-section-title {
+      font-size: 0.86rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--tb-accent-2);
+      margin-bottom: 6px;
+    }
+
+    .tb-panel-title {
+      font-size: 1.16rem;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .tb-code,
+    .tb-log,
+    .tb-mini {
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .tb-log {
+      background: rgba(3, 11, 16, 0.75);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 14px;
+      height: 540px;
+      overflow: auto;
+    }
+
+    .tb-log-line {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.82rem;
+    }
+
+    .tb-log-line:last-child {
+      border-bottom: 0;
+    }
+
+    .tb-log-seq {
+      color: var(--tb-accent);
+      margin-right: 8px;
+    }
+
+    .tb-flow-summary {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .tb-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tb-table-wrap {
+      overflow: auto;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(5, 15, 22, 0.65);
+    }
+
+    .tb-table-wrap table {
+      min-width: 760px;
+    }
+
+    .tb-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      line-height: 1.1;
+      background: rgba(89, 208, 255, 0.12);
+      color: #c9f2ff;
+      border: 1px solid rgba(89, 208, 255, 0.14);
+    }
+
+    .tb-pill.tb-pill-warn {
+      background: rgba(243, 179, 76, 0.12);
+      color: #ffe4b3;
+      border-color: rgba(243, 179, 76, 0.16);
+    }
+
+    .tb-pill.tb-pill-danger {
+      background: rgba(239, 111, 89, 0.12);
+      color: #ffd4cd;
+      border-color: rgba(239, 111, 89, 0.16);
+    }
+
+    .tb-pill.tb-pill-ok {
+      background: rgba(77, 211, 154, 0.12);
+      color: #d4ffec;
+      border-color: rgba(77, 211, 154, 0.16);
+    }
+
+    .v-field,
+    .v-card,
+    .v-sheet,
+    .v-table,
+    .v-tabs {
+      --v-theme-surface: 10, 24, 33;
+    }
+
+    .v-table > .v-table__wrapper > table > thead > tr > th {
+      color: rgba(237, 246, 251, 0.72);
+      font-size: 0.72rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .v-table > .v-table__wrapper > table > tbody > tr > td {
+      color: var(--tb-text);
+    }
+
+    .tb-footer-note {
+      font-size: 0.78rem;
+      color: var(--tb-muted);
+    }
+
+    @media (max-width: 1100px) {
+      .tb-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .tb-log {
+        height: 360px;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .tb-kpis {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.6.8/dist/vuetify.min.js"></script>
+  <script>
+    const { createApp } = Vue;
+    const { createVuetify } = Vuetify;
+
+    const codingSchemeOptions = [
+      { title: "Packed7Bit (0)", value: 0 },
+      { title: "ISO8859_1 (1)", value: 1 },
+      { title: "ISO8859_2 (2)", value: 2 },
+      { title: "ISO8859_3 (3)", value: 3 },
+      { title: "ISO8859_4 (4)", value: 4 },
+      { title: "ISO8859_5 (5)", value: 5 },
+      { title: "ISO8859_6 (6)", value: 6 },
+      { title: "ISO8859_7 (7)", value: 7 },
+      { title: "ISO8859_8 (8)", value: 8 },
+      { title: "ISO8859_9 (9)", value: 9 },
+      { title: "ISO8859_10 (10)", value: 10 },
+      { title: "ISO8859_13 (11)", value: 11 },
+      { title: "ISO8859_14 (12)", value: 12 },
+      { title: "ISO8859_15 (13)", value: 13 },
+      { title: "CodePage437 (14)", value: 14 },
+      { title: "CodePage737 (15)", value: 15 },
+      { title: "CodePage850 (16)", value: 16 },
+      { title: "CodePage852 (17)", value: 17 },
+      { title: "CodePage855 (18)", value: 18 },
+      { title: "CodePage857 (19)", value: 19 },
+      { title: "CodePage860 (20)", value: 20 },
+      { title: "CodePage861 (21)", value: 21 },
+      { title: "CodePage863 (22)", value: 22 },
+      { title: "CodePage865 (23)", value: 23 },
+      { title: "CodePage866 (24)", value: 24 },
+      { title: "CodePage869 (25)", value: 25 },
+      { title: "UTF16BE (26)", value: 26 },
+      { title: "VISCII (27)", value: 27 }
+    ];
+
+    const functionOptions = [
+      { title: "1 Alert", value: 1 },
+      { title: "2 Test", value: 2 },
+      { title: "3 Info", value: 3 },
+      { title: "4 Clear", value: 4 },
+      { title: "5 Availability", value: 5 }
+    ];
+
+    const messageTypeOptions = [
+      { title: "0 Transfer", value: 0 },
+      { title: "1 Report", value: 1 },
+      { title: "2 Ack", value: 2 }
+    ];
+
+    const app = createApp({
+      data() {
+        return {
+          lastSeq: 0,
+          snapshot: {
+            server_time: "",
+            clients: [],
+            subscribers: [],
+            groups: [],
+            callouts: [],
+            virtual_sds_endpoints: [],
+            activity: [],
+            last_seq: 0
+          },
+          activityFeed: [],
+          pollHandle: null,
+          refreshInFlight: false,
+          syncError: "",
+          sendStatus: "",
+          flowStatus: "Set destination and text, then start a thread.",
+          mainTab: "subscribers",
+          form: {
+            destination_type: "subscriber",
+            destination: null,
+            sds_type: "callout",
+            text: "",
+            payload_hex: "",
+            source_issi: null,
+            callout_ref_mode: "organized",
+            callout_function: 1,
+            callout_severity: 1,
+            callout_group_control: 0,
+            callout_message_type: 0,
+            callout_report_requested: false,
+            callout_text_coding_scheme: 1,
+            callout_storage_allowed: false,
+            callout_extension_header: false,
+            callout_timestamp_control: false,
+            callout_user_receipt_control: false,
+            callout_text_is_status: false,
+            callout_end: false,
+            callout_ptt_not_allowed: false
+          },
+          selectedCalloutKey: "",
+          codingSchemeOptions,
+          functionOptions,
+          messageTypeOptions
+        };
+      },
+      computed: {
+        syncLabel() {
+          if (this.syncError) return this.syncError;
+          if (!this.snapshot.server_time) return "Waiting for first sync";
+          return "Synced " + this.formatTime(this.snapshot.server_time) + " UTC snapshot";
+        },
+        destinationOptions() {
+          if (this.form.destination_type === "group") {
+            return this.uniqueSortedNumbers((this.snapshot.groups || []).map((g) => g.gssi)).map((value) => ({
+              title: "group:" + value,
+              value
+            }));
+          }
+          return this.uniqueSortedNumbers((this.snapshot.subscribers || []).map((s) => s.issi)).map((value) => ({
+            title: "subscriber:" + value,
+            value
+          }));
+        },
+        activeThreadOptions() {
+          return [{ title: "(new callout thread)", value: "" }].concat(
+            this.flowAnchorCallouts.map((c) => ({
+              title: `${c.destination_type}:${c.destination} #${c.callout_number} ${c.function_name || ""} r=${c.responses || 0} src=${c.source || 0}`,
+              value: c.key || ""
+            }))
+          );
+        },
+        flowAnchorCallouts() {
+          return (this.snapshot.callouts || []).filter((c) => c && c.destination_type && !this.isCalloutCleared(c) && !this.isSubscriberReplyCallout(c));
+        },
+        selectedCallout() {
+          if (!this.selectedCalloutKey) return null;
+          return this.flowAnchorCallouts.find((c) => c.key === this.selectedCalloutKey) || null;
+        },
+        flowReplies() {
+          const callout = this.selectedCallout;
+          if (!callout) return [];
+          const number = Number(callout.callout_number || 0);
+          const destination = Number(callout.destination || 0);
+          const source = Number(callout.source || 0);
+          const threadUpdatedAt = new Date(callout.updated || 0).getTime();
+          const all = this.snapshot.callouts || [];
+          return all.filter((c) => {
+            if (!c || c.key === callout.key) return false;
+            if (Number(c.callout_number || 0) !== number) return false;
+            if (!this.isSubscriberReplyCallout(c)) return false;
+            const parsed = this.parseCalloutKey(c.key);
+            if (!parsed) return false;
+            if (parsed.target !== 0 && (parsed.target === destination || (source !== 0 && parsed.target === source))) return true;
+            if (source !== 0 && Number(c.source || 0) === source) return true;
+            return false;
+          }).concat(
+            all.filter((c) => {
+              if (!c || c.key === callout.key) return false;
+              if (this.isSubscriberReplyCallout(c)) return false;
+              if (String(c.destination_type || "") !== "group") return false;
+              if (String(c.last_direction || "") !== "rx") return false;
+              if (Number(c.callout_number || 0) !== number) return false;
+              const updatedAt = new Date(c.updated || 0).getTime();
+              if (threadUpdatedAt > 0 && updatedAt > 0 && updatedAt + 3600000 < threadUpdatedAt) return false;
+              if (source !== 0 && Number(c.source || 0) === source) return false;
+              if (destination !== 0 && Number(c.destination || 0) === destination) return true;
+              return true;
+            })
+          ).filter((c, index, arr) => arr.findIndex((v) => v && v.key === c.key) === index)
+          .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
+        },
+        flowThreadText() {
+          if (!this.selectedCallout) {
+            return "No active thread selected. Starting Step 1 will create a fresh thread with a service-assigned reference.";
+          }
+          return `Thread ${this.selectedCallout.destination_type}:${this.selectedCallout.destination} ref #${this.selectedCallout.callout_number} source ${this.selectedCallout.source || 0}`;
+        },
+        responderCount() {
+          return new Set(this.flowReplies.map((r) => this.responderForReplyRow(r)).filter((v) => v > 0)).size;
+        },
+        summaryCards() {
+          return [
+            {
+              label: "Clients",
+              value: this.snapshot.clients.length,
+              sub: `${this.snapshot.subscribers.length} subscribers attached`
+            },
+            {
+              label: "Groups",
+              value: this.snapshot.groups.length,
+              sub: `${this.snapshot.callouts.length} tracked callouts`
+            },
+            {
+              label: "Virtual SDS",
+              value: this.snapshot.virtual_sds_endpoints.length,
+              sub: `${this.snapshot.virtual_sds_endpoints.reduce((sum, v) => sum + Number(v.queued || 0), 0)} queued messages`
+            },
+            {
+              label: "Activity",
+              value: this.activityFeed.length,
+              sub: `Last seq ${this.lastSeq || 0}`
+            }
+          ];
+        }
+      },
+      methods: {
+        uniqueSortedNumbers(values) {
+          return Array.from(new Set((values || []).map((v) => Number(v || 0)).filter((v) => v > 0))).sort((a, b) => a - b);
+        },
+        formatTime(value) {
+          if (!value) return "n/a";
+          const d = new Date(value);
+          if (Number.isNaN(d.getTime())) return String(value);
+          return d.toLocaleTimeString();
+        },
+        formatDateTime(value) {
+          if (!value) return "n/a";
+          const d = new Date(value);
+          if (Number.isNaN(d.getTime())) return String(value);
+          return d.toLocaleString();
+        },
+        parseCalloutKey(key) {
+          const raw = String(key || "");
+          const parts = raw.split(":");
+          if (parts.length < 3) return null;
+          if (parts.length === 3) {
+            return { kind: parts[0], destination: Number(parts[1] || 0), calloutNumber: Number(parts[2] || 0), len: parts.length };
+          }
+          return {
+            kind: parts[0],
+            destination: Number(parts[1] || 0),
+            target: Number(parts[2] || 0),
+            calloutNumber: Number(parts[3] || 0),
+            len: parts.length
+          };
+        },
+        isSubscriberReplyCallout(c) {
+          if (!c || c.destination_type !== "subscriber") return false;
+          const parsed = this.parseCalloutKey(c.key);
+          return !!(parsed && parsed.kind === "subscriber" && parsed.len >= 4);
+        },
+        isCalloutCleared(c) {
+          if (!c) return true;
+          if (c.end_callout) return true;
+          const state = String(c.state || "").toLowerCase();
+          return state === "cleared" || state.startsWith("cleared ");
+        },
+        formatCalloutTarget(c) {
+          if (this.isSubscriberReplyCallout(c)) {
+            const parsed = this.parseCalloutKey(c.key);
+            const target = parsed && parsed.target ? parsed.target : "?";
+            return `reply issi:${c.destination || 0} -> ${target}`;
+          }
+          return `${c.destination_type || "unknown"}:${c.destination || 0}`;
+        },
+        responderForReplyRow(reply) {
+          if (!reply) return 0;
+          if (this.isSubscriberReplyCallout(reply)) return Number(reply.destination || 0);
+          return Number(reply.source || 0);
+        },
+        replyStateLabel(reply) {
+          if (!reply) return "";
+          return `${reply.state || ""} via ${reply.destination_type || ""}:${reply.destination || 0}`;
+        },
+        pillClassForState(state) {
+          const value = String(state || "").toLowerCase();
+          if (value.includes("clear")) return "tb-pill-danger";
+          if (value.includes("rx") || value.includes("ack") || value.includes("report")) return "tb-pill-ok";
+          if (value.includes("queued") || value.includes("waiting")) return "tb-pill-warn";
+          return "";
+        },
+        async refresh() {
+          if (this.refreshInFlight) return;
+          this.refreshInFlight = true;
+          try {
+            const res = await fetch(`/api/dashboard/snapshot?since_seq=${this.lastSeq}`, { cache: "no-store" });
+            if (!res.ok) throw new Error(`snapshot failed ${res.status}`);
+            const data = await res.json();
+            this.snapshot = data;
+            this.lastSeq = data.last_seq || this.lastSeq;
+            if (Array.isArray(data.activity) && data.activity.length > 0) {
+              this.activityFeed = this.activityFeed.concat(data.activity);
+              if (this.activityFeed.length > 600) {
+                this.activityFeed = this.activityFeed.slice(this.activityFeed.length - 600);
+              }
+            }
+            if (this.selectedCalloutKey && !this.flowAnchorCallouts.some((c) => c.key === this.selectedCalloutKey)) {
+              this.selectedCalloutKey = "";
+            }
+            this.syncError = "";
+          } catch (err) {
+            this.syncError = `Sync error: ${err.message || err}`;
+          } finally {
+            this.refreshInFlight = false;
+          }
+        },
+        buildRequest(extra) {
+          const body = {
+            destination_type: this.form.destination_type,
+            destination: Number(this.form.destination || 0),
+            sds_type: this.form.sds_type,
+            text: this.form.text || "",
+            payload_hex: this.form.payload_hex || "",
+            source_issi: Number(this.form.source_issi || 0),
+            callout_ref_mode: this.form.callout_ref_mode,
+            callout_function: Number(this.form.callout_function || 1),
+            callout_severity: Number(this.form.callout_severity || 1),
+            callout_group_control: Number(this.form.callout_group_control || 0),
+            callout_message_type: Number(this.form.callout_message_type || 0),
+            callout_report_requested: !!this.form.callout_report_requested,
+            callout_text_coding_scheme: Number(this.form.callout_text_coding_scheme || 1),
+            callout_storage_allowed: !!this.form.callout_storage_allowed,
+            callout_extension_header: !!this.form.callout_extension_header,
+            callout_timestamp_control: !!this.form.callout_timestamp_control,
+            callout_user_receipt_control: !!this.form.callout_user_receipt_control,
+            callout_text_is_status: !!this.form.callout_text_is_status,
+            callout_end: !!this.form.callout_end,
+            callout_ptt_not_allowed: !!this.form.callout_ptt_not_allowed
+          };
+          if (extra && extra.callout_key) {
+            body.callout_key = String(extra.callout_key);
+          }
+          return body;
+        },
+        async sendRequest(body) {
+          const res = await fetch("/api/sds/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          const text = await res.text();
+          if (!res.ok) throw new Error(text || `request failed ${res.status}`);
+          const out = JSON.parse(text);
+          let info = `SDS sent call=${out.call_id} recipients(frame)=${out.recipients_frame}`;
+          if (out.source_virtual && out.virtual_endpoint && out.virtual_endpoint.issi) {
+            info += ` | reply ISSI=${out.virtual_endpoint.issi}`;
+          }
+          this.sendStatus = info;
+          await this.refresh();
+          return out;
+        },
+        async submitSDS() {
+          this.sendStatus = "Sending...";
+          try {
+            await this.sendRequest(this.buildRequest());
+          } catch (err) {
+            this.sendStatus = `Error: ${err.message || err}`;
+          }
+        },
+        applyCalloutToForm(callout, keepText) {
+          if (!callout) return;
+          this.form.destination_type = callout.destination_type || "group";
+          this.form.destination = Number(callout.destination || 0);
+          this.form.source_issi = Number(callout.source || 0);
+          this.form.sds_type = "callout";
+          this.form.callout_function = Number(callout.function || 1);
+          this.form.callout_severity = Number(callout.severity || 1);
+          this.form.callout_group_control = Number(callout.group_control || 0);
+          this.form.callout_report_requested = Number(callout.delivery_report_request || 0) > 0;
+          this.form.callout_text_coding_scheme = Number(callout.callout_text_coding_scheme || 1);
+          this.form.callout_text_is_status = !!callout.text_is_status;
+          this.form.callout_ptt_not_allowed = !!callout.ptt_not_allowed;
+          if (!keepText && callout.text) {
+            this.form.text = callout.text;
+          }
+        },
+        async loadThread() {
+          if (!this.selectedCallout) {
+            this.flowStatus = "Select an active thread first.";
+            return;
+          }
+          this.applyCalloutToForm(this.selectedCallout, true);
+          this.flowStatus = `Loaded ref #${this.selectedCallout.callout_number} for ${this.selectedCallout.destination_type}:${this.selectedCallout.destination}`;
+        },
+        async startThread() {
+          const callout = this.selectedCallout;
+          if (callout) this.applyCalloutToForm(callout, true);
+          this.form.sds_type = "callout";
+          this.form.payload_hex = "";
+          this.form.callout_message_type = 0;
+          this.form.callout_text_is_status = false;
+          this.form.callout_end = false;
+          this.form.callout_function = 1;
+          this.flowStatus = "Step 1: sending alert...";
+          try {
+            const out = await this.sendRequest(this.buildRequest(callout ? { callout_key: callout.key } : null));
+            this.flowStatus = out && out.callout_number !== undefined
+              ? `Step 1 complete: alert sent with reference #${out.callout_number}.`
+              : "Step 1 complete: alert sent.";
+          } catch (err) {
+            this.flowStatus = `Error: ${err.message || err}`;
+          }
+        },
+        async sendThreadMessage() {
+          const callout = this.selectedCallout;
+          if (!callout) {
+            this.flowStatus = "Select an active thread first.";
+            return;
+          }
+          this.applyCalloutToForm(callout, true);
+          this.form.payload_hex = "";
+          this.form.callout_function = 3;
+          this.form.callout_message_type = 0;
+          this.form.callout_text_is_status = false;
+          this.form.callout_end = false;
+          if (!String(this.form.text || "").trim()) {
+            this.form.text = String(callout.text || "INFO");
+          }
+          this.flowStatus = `Step 2: sending group message on reference #${callout.callout_number}...`;
+          try {
+            await this.sendRequest(this.buildRequest({ callout_key: callout.key }));
+            this.flowStatus = "Step 2 complete: group message sent on same reference.";
+          } catch (err) {
+            this.flowStatus = `Error: ${err.message || err}`;
+          }
+        },
+        async clearThread() {
+          const callout = this.selectedCallout;
+          if (!callout) {
+            this.flowStatus = "Select an active thread to clear.";
+            return;
+          }
+          this.applyCalloutToForm(callout, true);
+          this.form.payload_hex = "";
+          this.form.callout_function = 4;
+          this.form.callout_message_type = 0;
+          this.form.callout_text_is_status = false;
+          this.form.callout_end = true;
+          this.flowStatus = `Step 3: sending clear on reference #${callout.callout_number}...`;
+          try {
+            await this.sendRequest(this.buildRequest({ callout_key: callout.key }));
+            this.selectedCalloutKey = "";
+            this.flowStatus = "Step 3 complete: callout exited.";
+          } catch (err) {
+            this.flowStatus = `Error: ${err.message || err}`;
+          }
+        }
+      },
+      watch: {
+        "form.destination_type"() {
+          const current = Number(this.form.destination || 0);
+          if (current > 0 && !this.destinationOptions.some((item) => Number(item.value) === current)) {
+            this.form.destination = null;
+          }
+        }
+      },
+      async mounted() {
+        await this.refresh();
+        this.pollHandle = setInterval(() => {
+          this.refresh();
+        }, 1200);
+      },
+      beforeUnmount() {
+        if (this.pollHandle) clearInterval(this.pollHandle);
+      },
+      template: `
+        <v-app theme="dark">
+          <div class="tb-shell">
+            <v-app-bar flat class="tb-topbar">
+              <v-container fluid class="px-4 px-md-8">
+                <div class="d-flex align-center justify-space-between w-100">
+                  <div>
+                    <div class="tb-section-title mb-1">TETRA Brew</div>
+                    <div class="text-h6 font-weight-bold">Live Console / Callout Desk</div>
+                  </div>
+                  <div class="d-flex align-center ga-3">
+                    <v-chip color="info" variant="tonal" prepend-icon="mdi-access-point-network">
+                      {{ snapshot.clients.length }} clients
+                    </v-chip>
+                    <v-btn color="warning" variant="flat" prepend-icon="mdi-refresh" @click="refresh">
+                      Refresh
+                    </v-btn>
+                  </div>
+                </div>
+              </v-container>
+            </v-app-bar>
+
+            <v-main>
+              <v-container fluid class="px-4 px-md-8 py-6">
+                <v-card rounded="xl" class="tb-hero mb-6">
+                  <v-row class="pa-6 pa-md-8" align="stretch">
+                    <v-col cols="12" md="5">
+                      <div class="tb-eyebrow">Operational Surface</div>
+                      <h1 class="tb-headline">Callout routing, SDS delivery, live state.</h1>
+                      <p class="tb-muted text-body-1 mb-5">
+                        Vue 3 + Vuetify front end over the existing Brew dashboard APIs. Flow control, live topology, and payload composition are all running from the same console now.
+                      </p>
+                      <div class="tb-chip-row">
+                        <v-chip color="info" variant="tonal" prepend-icon="mdi-clock-outline">{{ syncLabel }}</v-chip>
+                        <v-chip color="success" variant="tonal" prepend-icon="mdi-broadcast">{{ snapshot.groups.length }} groups</v-chip>
+                        <v-chip color="warning" variant="tonal" prepend-icon="mdi-account-voice">{{ snapshot.subscribers.length }} subscribers</v-chip>
+                      </div>
+                    </v-col>
+                    <v-col cols="12" md="7">
+                      <div class="tb-kpis">
+                        <div v-for="card in summaryCards" :key="card.label" class="tb-kpi">
+                          <div class="tb-kpi-label">{{ card.label }}</div>
+                          <div class="tb-kpi-value">{{ card.value }}</div>
+                          <div class="tb-kpi-sub">{{ card.sub }}</div>
+                        </div>
+                      </div>
+                    </v-col>
+                  </v-row>
+                </v-card>
+
+                <v-row>
+                  <v-col cols="12" lg="8">
+                    <v-card rounded="xl" class="tb-card mb-6">
+                      <v-card-text class="pa-5 pa-md-6">
+                        <div class="d-flex align-center justify-space-between mb-4">
+                          <div>
+                            <div class="tb-section-title">Guided Flow</div>
+                            <h2 class="tb-panel-title">Callout thread operations</h2>
+                          </div>
+                          <v-chip color="secondary" variant="tonal" prepend-icon="mdi-pulse">
+                            {{ flowReplies.length }} replies / {{ responderCount }} responders
+                          </v-chip>
+                        </div>
+
+                        <div class="tb-flow-summary mb-4">
+                          <v-row>
+                            <v-col cols="12" md="6">
+                              <v-select
+                                v-model="selectedCalloutKey"
+                                :items="activeThreadOptions"
+                                label="Active thread"
+                                density="comfortable"
+                                variant="outlined"
+                                hide-details
+                              />
+                            </v-col>
+                            <v-col cols="12" md="6">
+                              <v-select
+                                v-model="form.callout_ref_mode"
+                                :items="[
+                                  { title: 'Organized (recommended)', value: 'organized' },
+                                  { title: 'Random', value: 'random' },
+                                  { title: 'Reuse selected', value: 'reuse' }
+                                ]"
+                                label="Reference strategy"
+                                density="comfortable"
+                                variant="outlined"
+                                hide-details
+                              />
+                            </v-col>
+                          </v-row>
+                          <div class="tb-mini tb-muted mt-4">{{ flowThreadText }}</div>
+                          <div class="tb-mini mt-2">{{ flowStatus }}</div>
+                          <div class="d-flex flex-wrap ga-3 mt-4">
+                            <v-btn color="info" variant="flat" prepend-icon="mdi-bell-ring-outline" @click="startThread">1. Alert Group</v-btn>
+                            <v-btn color="secondary" variant="flat" prepend-icon="mdi-message-outline" @click="sendThreadMessage">2. Send Group Message</v-btn>
+                            <v-btn color="error" variant="flat" prepend-icon="mdi-close-octagon-outline" @click="clearThread">3. Exit Callout</v-btn>
+                            <v-btn color="warning" variant="outlined" prepend-icon="mdi-arrow-down-circle-outline" @click="loadThread">Load Thread -> Form</v-btn>
+                          </div>
+                        </div>
+
+                        <v-table density="compact" class="mb-2">
+                          <thead>
+                            <tr>
+                              <th>Responder</th>
+                              <th>State</th>
+                              <th>Text</th>
+                              <th>Last</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-if="flowReplies.length === 0">
+                              <td colspan="4" class="tb-muted">Responses will appear here after alerting.</td>
+                            </tr>
+                            <tr v-for="reply in flowReplies" :key="reply.key">
+                              <td>{{ responderForReplyRow(reply) || 0 }}</td>
+                              <td><span class="tb-pill" :class="pillClassForState(reply.state)">{{ replyStateLabel(reply) }}</span></td>
+                              <td>{{ reply.text || "" }}</td>
+                              <td>{{ formatDateTime(reply.updated) }}</td>
+                            </tr>
+                          </tbody>
+                        </v-table>
+                      </v-card-text>
+                    </v-card>
+
+                    <v-card rounded="xl" class="tb-card">
+                      <v-card-text class="pa-5 pa-md-6">
+                        <div class="d-flex align-center justify-space-between mb-4">
+                          <div>
+                            <div class="tb-section-title">Composer</div>
+                            <h2 class="tb-panel-title">SDS / Callout send form</h2>
+                          </div>
+                          <v-chip color="success" variant="tonal" prepend-icon="mdi-send-check">{{ sendStatus || "Ready" }}</v-chip>
+                        </div>
+
+                        <v-form @submit.prevent="submitSDS">
+                          <v-row>
+                            <v-col cols="12" md="6">
+                              <v-select
+                                v-model="form.destination_type"
+                                :items="[
+                                  { title: 'Subscriber', value: 'subscriber' },
+                                  { title: 'Group', value: 'group' }
+                                ]"
+                                label="Destination type"
+                                variant="outlined"
+                              />
+                            </v-col>
+                            <v-col cols="12" md="6">
+                              <v-text-field
+                                v-model.number="form.destination"
+                                label="Destination"
+                                type="number"
+                                min="1"
+                                variant="outlined"
+                              />
+                            </v-col>
+                            <v-col cols="12">
+                              <v-select
+                                :items="[{ title: '(manual entry)', value: null }].concat(destinationOptions)"
+                                :model-value="destinationOptions.some((item) => Number(item.value) === Number(form.destination || 0)) ? Number(form.destination || 0) : null"
+                                label="Destination picker"
+                                variant="outlined"
+                                @update:model-value="form.destination = $event"
+                              />
+                            </v-col>
+                            <v-col cols="12" md="6">
+                              <v-select
+                                v-model="form.sds_type"
+                                :items="[
+                                  { title: 'CallOut', value: 'callout' },
+                                  { title: 'FlashSDS', value: 'flash' },
+                                  { title: 'HomeIndicator', value: 'home_indicator' },
+                                  { title: 'WAP-Push', value: 'wap_push' }
+                                ]"
+                                label="SDS type"
+                                variant="outlined"
+                              />
+                            </v-col>
+                            <v-col cols="12" md="6">
+                              <v-text-field
+                                v-model.number="form.source_issi"
+                                label="Source ISSI (optional)"
+                                type="number"
+                                min="0"
+                                variant="outlined"
+                              />
+                            </v-col>
+                          </v-row>
+
+                          <v-expand-transition>
+                            <div v-if="form.sds_type === 'callout'">
+                              <div class="tb-section-title mt-2">Callout options</div>
+                              <v-row>
+                                <v-col cols="12" md="6">
+                                  <v-select v-model="form.callout_function" :items="functionOptions" label="Function" variant="outlined" />
+                                </v-col>
+                                <v-col cols="12" md="6">
+                                  <v-select v-model="form.callout_message_type" :items="messageTypeOptions" label="Message type" variant="outlined" />
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                  <v-text-field v-model.number="form.callout_severity" label="Severity (0-15)" type="number" min="0" max="15" variant="outlined" />
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                  <v-text-field v-model.number="form.callout_group_control" label="Group control (0-3)" type="number" min="0" max="3" variant="outlined" />
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                  <v-select v-model="form.callout_text_coding_scheme" :items="codingSchemeOptions" label="Text coding scheme" variant="outlined" />
+                                </v-col>
+                              </v-row>
+                              <v-row>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_report_requested" label="Report requested" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_storage_allowed" label="Storage allowed" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_extension_header" label="Extension header used" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_timestamp_control" label="Timestamp control" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_user_receipt_control" label="User receipt control" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_text_is_status" label="Text is status" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_ptt_not_allowed" label="PTT not allowed" hide-details /></v-col>
+                                <v-col cols="12" md="4"><v-checkbox v-model="form.callout_end" label="End callout" hide-details /></v-col>
+                              </v-row>
+                            </div>
+                          </v-expand-transition>
+
+                          <v-textarea
+                            v-model="form.text"
+                            label="Text payload"
+                            variant="outlined"
+                            rows="4"
+                            auto-grow
+                            class="mt-2"
+                          />
+                          <v-textarea
+                            v-model="form.payload_hex"
+                            label="Raw payload hex (optional; overrides text/type)"
+                            variant="outlined"
+                            rows="3"
+                            auto-grow
+                          />
+
+                          <div class="d-flex flex-wrap align-center ga-3 mt-2">
+                            <v-btn color="warning" size="large" type="submit" prepend-icon="mdi-rocket-launch-outline">Send SDS</v-btn>
+                            <div class="tb-footer-note">Service-managed callout references remain intact; this UI only composes requests against the existing API.</div>
+                          </div>
+                        </v-form>
+                      </v-card-text>
+                    </v-card>
+                  </v-col>
+
+                  <v-col cols="12" lg="4">
+                    <v-card rounded="xl" class="tb-card">
+                      <v-card-text class="pa-5 pa-md-6">
+                        <div class="d-flex align-center justify-space-between mb-4">
+                          <div>
+                            <div class="tb-section-title">Live stream</div>
+                            <h2 class="tb-panel-title">Activity log</h2>
+                          </div>
+                          <v-chip color="info" variant="tonal" prepend-icon="mdi-counter">{{ activityFeed.length }}</v-chip>
+                        </div>
+                        <div class="tb-log">
+                          <div v-if="activityFeed.length === 0" class="tb-muted">No activity yet.</div>
+                          <div v-for="item in activityFeed" :key="item.seq" class="tb-log-line">
+                            <div class="d-flex align-start">
+                              <span class="tb-log-seq tb-code">[{{ item.seq }}]</span>
+                              <div>
+                                <div class="font-weight-bold">{{ item.kind }}</div>
+                                <div class="tb-muted">{{ formatDateTime(item.time) }}</div>
+                                <div class="mt-1">{{ item.message }}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </v-card-text>
+                    </v-card>
+                  </v-col>
+                </v-row>
+
+                <v-card rounded="xl" class="tb-card mt-6">
+                  <v-card-text class="pa-5 pa-md-6">
+                    <div class="d-flex align-center justify-space-between mb-4">
+                      <div>
+                        <div class="tb-section-title">Topology + state</div>
+                        <h2 class="tb-panel-title">Subscribers, groups, callouts, virtual endpoints</h2>
+                      </div>
+                    </div>
+
+                    <v-tabs v-model="mainTab" color="warning" class="mb-4">
+                      <v-tab value="subscribers">Subscribers</v-tab>
+                      <v-tab value="groups">Groups</v-tab>
+                      <v-tab value="callouts">Callouts</v-tab>
+                      <v-tab value="virtual">Virtual SDS</v-tab>
+                    </v-tabs>
+
+                    <v-window v-model="mainTab">
+                      <v-window-item value="subscribers">
+                        <div class="tb-table-wrap">
+                          <v-table density="comfortable">
+                            <thead>
+                              <tr>
+                                <th>ISSI</th>
+                                <th>Groups</th>
+                                <th>Session</th>
+                                <th>Remote</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="subscriber in snapshot.subscribers" :key="subscriber.session + ':' + subscriber.issi">
+                                <td>{{ subscriber.issi }}</td>
+                                <td>{{ (subscriber.groups || []).join(', ') }}</td>
+                                <td class="tb-code">{{ subscriber.session }}</td>
+                                <td class="tb-code">{{ subscriber.remote }}</td>
+                              </tr>
+                            </tbody>
+                          </v-table>
+                        </div>
+                      </v-window-item>
+
+                      <v-window-item value="groups">
+                        <div class="tb-table-wrap">
+                          <v-table density="comfortable">
+                            <thead>
+                              <tr>
+                                <th>GSSI</th>
+                                <th>Subscribers</th>
+                                <th>Sessions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="group in snapshot.groups" :key="group.gssi">
+                                <td>{{ group.gssi }}</td>
+                                <td>{{ group.subscribers }}</td>
+                                <td>{{ group.sessions }}</td>
+                              </tr>
+                            </tbody>
+                          </v-table>
+                        </div>
+                      </v-window-item>
+
+                      <v-window-item value="callouts">
+                        <div class="tb-table-wrap">
+                          <v-table density="comfortable">
+                            <thead>
+                              <tr>
+                                <th>Target</th>
+                                <th>Source</th>
+                                <th>No</th>
+                                <th>Fn</th>
+                                <th>Ref</th>
+                                <th>State</th>
+                                <th>Text</th>
+                                <th>Last</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="callout in snapshot.callouts" :key="callout.key">
+                                <td>{{ formatCalloutTarget(callout) }}</td>
+                                <td>{{ callout.source || 0 }}</td>
+                                <td>{{ callout.callout_number }}</td>
+                                <td>{{ callout.function_name }} ({{ callout.function }})</td>
+                                <td>{{ callout.message_ref }}</td>
+                                <td><span class="tb-pill" :class="pillClassForState(callout.state)">{{ callout.state }} / {{ callout.last_direction }} / r={{ callout.responses }}</span></td>
+                                <td>{{ callout.text || "" }}</td>
+                                <td>{{ formatDateTime(callout.updated) }}</td>
+                              </tr>
+                            </tbody>
+                          </v-table>
+                        </div>
+                      </v-window-item>
+
+                      <v-window-item value="virtual">
+                        <div class="tb-table-wrap">
+                          <v-table density="comfortable">
+                            <thead>
+                              <tr>
+                                <th>ISSI</th>
+                                <th>Name</th>
+                                <th>Queued</th>
+                                <th>RX/TX</th>
+                                <th>Last kind</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="endpoint in snapshot.virtual_sds_endpoints" :key="endpoint.issi">
+                                <td>{{ endpoint.issi }}</td>
+                                <td>{{ endpoint.name || "" }}</td>
+                                <td>{{ endpoint.queued || 0 }}</td>
+                                <td>{{ endpoint.rx_count || 0 }} / {{ endpoint.tx_count || 0 }}</td>
+                                <td>{{ endpoint.last_msg_kind || "" }}</td>
+                              </tr>
+                            </tbody>
+                          </v-table>
+                        </div>
+                      </v-window-item>
+                    </v-window>
+                  </v-card-text>
+                </v-card>
+              </v-container>
+            </v-main>
+          </div>
+        </v-app>
+      `
+    });
+
+    const vuetify = createVuetify({
+      theme: {
+        defaultTheme: "brew",
+        themes: {
+          brew: {
+            dark: true,
+            colors: {
+              background: "#081318",
+              surface: "#0a1821",
+              primary: "#59d0ff",
+              secondary: "#f3b34c",
+              info: "#59d0ff",
+              success: "#4dd39a",
+              warning: "#f3b34c",
+              error: "#ef6f59"
+            }
+          }
+        }
+      }
+    });
+
+    app.use(vuetify).mount("#app");
+  </script>
+</body>
+</html>

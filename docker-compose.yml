@@ -1,0 +1,70 @@
+services:
+  brew-router:
+    image: tetra-brew:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tetra-brew-router
+    env_file:
+      - .env
+    environment:
+      BREW_MODE: server
+      WEBRADIO_ENABLED: "false"
+      ZELLO_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  brew-webradio:
+    image: tetra-brew:local
+    container_name: tetra-brew-webradio
+    entrypoint: ["/app/bin/tetra-brew-webradio"]
+    env_file:
+      - .env
+    environment:
+      BREW_MODE: webradio
+      BREW_CLIENT_BASE_URL: http://brew-router:8080
+      WEBRADIO_ENABLED: "true"
+      WEBRADIO_FFMPEG_BIN: ffmpeg
+      WEBRADIO_ENCODER_BIN: /app/bin/tetra-acelp-stdio
+      WEBRADIO_STREAM_URL: "https://dispatcher.rndfnk.com/hr/hrinfo/live/mp3/high?aggregator=liveradio-de"
+      WEBRADIO_TALKGROUP: 15002
+      WEBRADIO_SOURCE_ISSI: 899001
+    depends_on:
+      - brew-router
+    restart: unless-stopped
+
+  brew-zello:
+    image: tetra-brew:local
+    container_name: tetra-brew-zello
+    entrypoint: ["/app/bin/tetra-brew-zello"]
+    env_file:
+      - .env
+    environment:
+      BREW_MODE: zello
+      BREW_CLIENT_BASE_URL: http://brew-router:8080
+      ZELLO_ENABLED: "true"
+      ZELLO_TRAFFIC_FFMPEG_BIN: ffmpeg
+      ZELLO_TRAFFIC_ENCODER_BIN: /app/bin/tetra-acelp-stdio
+      ZELLO_TRAFFIC_DECODER_BIN: /app/bin/tetra-acelp-stdio-decoder
+      ZELLO_CHANNELS: "Trashtalk TP"
+      ZELLO_CHANNEL_GSSI_MAP: "Trashtalk TP=15003"
+    depends_on:
+      - brew-router
+    restart: unless-stopped
+
+  brew-echo:
+    image: tetra-brew:local
+    container_name: tetra-brew-echo
+    entrypoint: ["/app/bin/tetra-brew-echo"]
+    env_file:
+      - .env
+    environment:
+      BREW_MODE: echo
+      BREW_CLIENT_BASE_URL: http://brew-router:8080
+      ECHO_TALKGROUP: "15001"
+      ECHO_SOURCE_ISSI: "899002"
+      ECHO_PLAYBACK_DELAY: "300ms"
+    depends_on:
+      - brew-router
+    restart: unless-stopped

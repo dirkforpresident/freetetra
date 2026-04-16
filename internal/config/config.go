@@ -1,0 +1,350 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	BrewMode       string
+	HTTPListenAddr string
+	UserAgent      string
+	ReconnectDelay time.Duration
+
+	Server   ServerConfig
+	Client   BrewClientConfig
+	MQTT     MQTTConfig
+	Netstack NetstackConfig
+	WebRadio WebRadioConfig
+	Zello    ZelloConfig
+	Echo     EchoConfig
+}
+
+type ServerConfig struct {
+	Path         string
+	Realm        string
+	Username     string
+	Password     string
+	TokenTTL     time.Duration
+	PingInterval time.Duration
+	PongTimeout  time.Duration
+	WriteTimeout time.Duration
+}
+
+type BrewClientConfig struct {
+	BaseURL          string
+	Path             string
+	Username         string
+	Password         string
+	ReconnectDelay   time.Duration
+	DiscoveryTimeout time.Duration
+	WriteTimeout     time.Duration
+}
+
+type MQTTConfig struct {
+	Enabled   bool
+	Broker    string
+	ClientID  string
+	Username  string
+	Password  string
+	QoS       byte
+	TopicUp   string
+	TopicDown string
+}
+
+type NetstackConfig struct {
+	BridgeEnabled    bool
+	RouteFile        string
+	CallTopic        string
+	TrafficTopic     string
+	Encoding         string
+	ReleaseCause     uint8
+	MinTrafficFrames int
+	PendingMaxAge    time.Duration
+	RouteCallTimeout time.Duration
+
+	EncoderMode    string
+	EncoderURL     string
+	EncoderTimeout time.Duration
+}
+
+type WebRadioConfig struct {
+	Enabled          bool
+	StreamURL        string
+	Talkgroup        uint32
+	SourceISSI       uint32
+	BrewISSI         uint32
+	FFmpegBin        string
+	EncoderBin       string
+	EncoderArgs      string
+	EncoderFrameSize int
+	ReconnectDelay   time.Duration
+	ReleaseCause     uint8
+}
+
+type ZelloConfig struct {
+	Enabled                 bool
+	WSURL                   string
+	Username                string
+	Password                string
+	Channels                []string
+	ChannelGSSIMap          string
+	BrewISSI                uint32
+	SourceISSIBase          uint32
+	CodecSampleRate         uint16
+	CodecFrames             int
+	CodecFrameSize          int
+	CodecDurationMS         int
+	TranscodeTraffic        bool
+	TrafficDecoderBin       string
+	TrafficFFmpegBin        string
+	TrafficFFmpegArgs       string
+	TrafficEncoderBin       string
+	TrafficEncoderArgs      string
+	TrafficEncoderFrameSize int
+	ListenOnly              bool
+	PlatformType            string
+	PlatformName            string
+	ReconnectDelay          time.Duration
+	PingInterval            time.Duration
+	ResponseTimeout         time.Duration
+}
+
+type EchoConfig struct {
+	Talkgroup     uint32
+	BrewISSI      uint32
+	VirtualISSI   uint32
+	SourceISSI    uint32
+	PlaybackDelay time.Duration
+	FrameInterval time.Duration
+	ReleaseCause  uint8
+	MaxFrames     int
+}
+
+func LoadFromEnv() (Config, error) {
+	_ = loadDotEnv(".env")
+
+	cfg := Config{
+		BrewMode:       env("BREW_MODE", "server"),
+		HTTPListenAddr: env("HTTP_LISTEN_ADDR", ":8080"),
+		UserAgent:      env("USER_AGENT", "tetra-brew-backend/0.1"),
+		ReconnectDelay: envDuration("RECONNECT_DELAY", 2*time.Second),
+		Server: ServerConfig{
+			Path:         normalizePath(env("BREW_SERVER_PATH", "/brew")),
+			Realm:        env("BREW_SERVER_REALM", "TETRA Homebrew"),
+			Username:     env("BREW_SERVER_USERNAME", ""),
+			Password:     env("BREW_SERVER_PASSWORD", ""),
+			TokenTTL:     envDuration("BREW_SERVER_TOKEN_TTL", 2*time.Minute),
+			PingInterval: envDuration("BREW_SERVER_PING_INTERVAL", 5*time.Second),
+			PongTimeout:  envDuration("BREW_SERVER_PONG_TIMEOUT", 45*time.Second),
+			WriteTimeout: envDuration("BREW_SERVER_WRITE_TIMEOUT", 5*time.Second),
+		},
+		Client: BrewClientConfig{
+			BaseURL:          env("BREW_CLIENT_BASE_URL", "http://127.0.0.1:8080"),
+			Path:             normalizePath(env("BREW_CLIENT_PATH", env("BREW_SERVER_PATH", "/brew"))),
+			Username:         env("BREW_CLIENT_USERNAME", env("BREW_SERVER_USERNAME", "")),
+			Password:         env("BREW_CLIENT_PASSWORD", env("BREW_SERVER_PASSWORD", "")),
+			ReconnectDelay:   envDuration("BREW_CLIENT_RECONNECT_DELAY", 3*time.Second),
+			DiscoveryTimeout: envDuration("BREW_CLIENT_DISCOVERY_TIMEOUT", 5*time.Second),
+			WriteTimeout:     envDuration("BREW_CLIENT_WRITE_TIMEOUT", 5*time.Second),
+		},
+		MQTT: MQTTConfig{
+			Enabled:   envBool("MQTT_ENABLED", true),
+			Broker:    env("MQTT_BROKER", "tcp://127.0.0.1:1883"),
+			ClientID:  env("MQTT_CLIENT_ID", "brew-backend-dev"),
+			Username:  env("MQTT_USERNAME", ""),
+			Password:  env("MQTT_PASSWORD", ""),
+			QoS:       byte(envInt("MQTT_QOS", 0)),
+			TopicUp:   env("MQTT_ACELP_UP_TOPIC", "brew/calls/+/acelp/up"),
+			TopicDown: env("MQTT_ACELP_DOWN_TOPIC_TEMPLATE", "brew/calls/%s/acelp/down"),
+		},
+		Netstack: NetstackConfig{
+			BridgeEnabled:    envBool("NETSTACK_BRIDGE_ENABLED", false),
+			RouteFile:        env("NETSTACK_ROUTE_FILE", "./netstack-routes.example.json"),
+			CallTopic:        env("NETSTACK_CALL_TOPIC", "live/+/+/call/+/+"),
+			TrafficTopic:     env("NETSTACK_TRAFFIC_TOPIC", "live/+/+/traffic/+"),
+			Encoding:         strings.ToLower(env("NETSTACK_TRAFFIC_ENCODING", "hex")),
+			ReleaseCause:     uint8(envInt("NETSTACK_RELEASE_CAUSE", 0)),
+			MinTrafficFrames: envInt("NETSTACK_MIN_TRAFFIC_FRAMES", 8),
+			PendingMaxAge:    envDuration("NETSTACK_PENDING_MAX_AGE", 2*time.Second),
+			RouteCallTimeout: envDuration("NETSTACK_ROUTE_CALL_TIMEOUT", 30*time.Second),
+			EncoderMode:      env("NETSTACK_ENCODER_MODE", "passthrough"),
+			EncoderURL:       env("NETSTACK_ENCODER_URL", ""),
+			EncoderTimeout: envDuration(
+				"NETSTACK_ENCODER_TIMEOUT",
+				2*time.Second,
+			),
+		},
+		WebRadio: WebRadioConfig{
+			Enabled:          envBool("WEBRADIO_ENABLED", false),
+			StreamURL:        env("WEBRADIO_STREAM_URL", ""),
+			Talkgroup:        uint32(envInt("WEBRADIO_TALKGROUP", 0)),
+			SourceISSI:       uint32(envInt("WEBRADIO_SOURCE_ISSI", 900001)),
+			BrewISSI:         uint32(envInt("WEBRADIO_BREW_ISSI", 0)),
+			FFmpegBin:        env("WEBRADIO_FFMPEG_BIN", "ffmpeg"),
+			EncoderBin:       env("WEBRADIO_ENCODER_BIN", "tetra-acelp-stdio"),
+			EncoderArgs:      env("WEBRADIO_ENCODER_ARGS", ""),
+			EncoderFrameSize: envInt("WEBRADIO_ENCODER_FRAME_SIZE", 18),
+			ReconnectDelay:   envDuration("WEBRADIO_RECONNECT_DELAY", 3*time.Second),
+			ReleaseCause:     uint8(envInt("WEBRADIO_RELEASE_CAUSE", 0)),
+		},
+		Zello: ZelloConfig{
+			Enabled:          envBool("ZELLO_ENABLED", false),
+			WSURL:            env("ZELLO_WS_URL", ""),
+			Username:         env("ZELLO_USERNAME", ""),
+			Password:         env("ZELLO_PASSWORD", ""),
+			Channels:         envCSV("ZELLO_CHANNELS"),
+			ChannelGSSIMap:   env("ZELLO_CHANNEL_GSSI_MAP", ""),
+			BrewISSI:         uint32(envInt("ZELLO_BREW_ISSI", 899001)),
+			SourceISSIBase:   uint32(envInt("ZELLO_SOURCE_ISSI_BASE", 800000)),
+			CodecSampleRate:  uint16(envInt("ZELLO_CODEC_SAMPLE_RATE", 8000)),
+			CodecFrames:      envInt("ZELLO_CODEC_FRAMES_PER_PACKET", 1),
+			CodecFrameSize:   envInt("ZELLO_CODEC_FRAME_SIZE", 60),
+			CodecDurationMS:  envInt("ZELLO_CODEC_PACKET_DURATION_MS", 20),
+			TranscodeTraffic: envBool("ZELLO_TRANSCODE_TRAFFIC", true),
+			TrafficDecoderBin: env(
+				"ZELLO_TRAFFIC_DECODER_BIN",
+				"./_other_repos_/tetra-acelp/tetra-acelp-stdio-decoder",
+			),
+			TrafficFFmpegBin:  env("ZELLO_TRAFFIC_FFMPEG_BIN", "ffmpeg"),
+			TrafficFFmpegArgs: env("ZELLO_TRAFFIC_FFMPEG_ARGS", ""),
+			TrafficEncoderBin: env(
+				"ZELLO_TRAFFIC_ENCODER_BIN",
+				"./_other_repos_/tetra-acelp/tetra-acelp-stdio",
+			),
+			TrafficEncoderArgs:      env("ZELLO_TRAFFIC_ENCODER_ARGS", ""),
+			TrafficEncoderFrameSize: envInt("ZELLO_TRAFFIC_ENCODER_FRAME_SIZE", 18),
+			ListenOnly:              envBool("ZELLO_LISTEN_ONLY", true),
+			PlatformType:            env("ZELLO_PLATFORM_TYPE", "tetra-brew"),
+			PlatformName:            env("ZELLO_PLATFORM_NAME", "github.com/freetetra/server"),
+			ReconnectDelay:          envDuration("ZELLO_RECONNECT_DELAY", 5*time.Second),
+			PingInterval:            envDuration("ZELLO_PING_INTERVAL", 10*time.Second),
+			ResponseTimeout:         envDuration("ZELLO_RESPONSE_TIMEOUT", 10*time.Second),
+		},
+		Echo: EchoConfig{
+			Talkgroup:     uint32(envInt("ECHO_TALKGROUP", 10002)),
+			BrewISSI:      uint32(envInt("ECHO_BREW_ISSI", 899002)),
+			VirtualISSI:   uint32(envInt("ECHO_VIRTUAL_ISSI", 0)),
+			SourceISSI:    uint32(envInt("ECHO_SOURCE_ISSI", 0)),
+			PlaybackDelay: envDuration("ECHO_PLAYBACK_DELAY", 300*time.Millisecond),
+			FrameInterval: envDuration("ECHO_FRAME_INTERVAL", 60*time.Millisecond),
+			ReleaseCause:  uint8(envInt("ECHO_RELEASE_CAUSE", 0)),
+			MaxFrames:     envInt("ECHO_MAX_FRAMES", 2000),
+		},
+	}
+
+	switch cfg.BrewMode {
+	case "server", "hybrid", "client", "router", "webradio", "zello", "echo":
+	default:
+		return cfg, fmt.Errorf("invalid BREW_MODE=%q", cfg.BrewMode)
+	}
+
+	return cfg, nil
+}
+
+func loadDotEnv(path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		value = strings.Trim(value, `"'`)
+		if key == "" {
+			continue
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, value)
+	}
+	return nil
+}
+
+func env(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(v)
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envInt(key string, fallback int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envCSV(key string) []string {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func normalizePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "/brew"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	path = strings.TrimSuffix(path, "/")
+	if path == "" {
+		return "/brew"
+	}
+	return path
+}

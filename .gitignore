@@ -1,0 +1,23 @@
+# Binaries
+freetetra
+freetetra-*
+tetra-brew
+tetra-brew-*
+*.exe
+
+# Config (contains secrets)
+config.toml
+.env
+
+# Go
+vendor/
+
+# Data
+data/
+announce_*.bin
+*.bin
+
+# IDE
+.idea/
+.vscode/
+*.swp

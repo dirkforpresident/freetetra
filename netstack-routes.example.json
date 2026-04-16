@@ -1,0 +1,28 @@
+{
+  "mappings": [
+    {
+      "name": "Range map 204.1 11000-11999 -> 91000",
+      "mcc": 262,
+      "mnc": 138,
+      "netstack_gssi_min": 1,
+      "netstack_gssi_max": 9999999,
+      "brew_gssi": 10001
+    },
+    {
+      "name": "Range map 204.1 11000-11999 -> 91000",
+      "mcc": 262,
+      "mnc": 102,
+      "netstack_gssi_min": 1,
+      "netstack_gssi_max": 9999999,
+      "brew_gssi": 10001
+    },
+    {
+      "name": "Range map 204.1 11000-11999 -> 91000",
+      "mcc": 262,
+      "mnc": 127,
+      "netstack_gssi_min": 1,
+      "netstack_gssi_max": 9999999,
+      "brew_gssi": 10000
+    }
+  ]
+}
