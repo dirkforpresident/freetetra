@@ -44,6 +44,8 @@ type Service struct {
 
 	sdsRouteHintMu sync.RWMutex
 	sdsRouteHints  map[uint32]sdsRouteHint
+
+	federation *federationBridge
 }
 
 type activeCall struct {
@@ -91,6 +93,11 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	s.registerDashboardHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
+	if cfg.Federation.Enabled && cfg.Federation.Name != "" {
+		s.federation = newFederationBridge(cfg, logger, s)
+		logger.Printf("federation: enabled as '%s' with %d peer(s)", cfg.Federation.Name, len(cfg.Federation.Peers))
+	}
+
 	if cfg.Netstack.BridgeEnabled {
 		logger.Printf("netstack bridge is disabled in this build; ignoring NETSTACK_BRIDGE_ENABLED=true")
 	}
@@ -119,6 +126,9 @@ func (s *Service) initBuiltInVirtualSDSRoutes() {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if s.federation != nil {
+		s.federation.start(ctx)
+	}
 	return s.server.Start(ctx)
 }
 

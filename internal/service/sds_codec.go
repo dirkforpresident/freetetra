@@ -448,3 +448,13 @@ func isLikelySDSProtocolID(v byte) bool {
 	}
 	return v >= 130 && v <= 141
 }
+
+
+// sdsTLDeliveryReportRequested checks if an SDS-TL payload has the delivery report flag set.
+func sdsTLDeliveryReportRequested(payload []byte) bool {
+	if len(payload) < 2 {
+		return false
+	}
+	// SDS-TL message type is in bits 4-7 of byte 1; delivery report flag is bit 0 of byte 1.
+	return payload[1]&0x01 != 0
+}

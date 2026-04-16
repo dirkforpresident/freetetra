@@ -20,7 +20,47 @@ type Config struct {
 	Netstack NetstackConfig
 	WebRadio WebRadioConfig
 	Zello    ZelloConfig
-	Echo     EchoConfig
+	Echo       EchoConfig
+	MOTD       MOTDConfig
+	SIP        SIPConfig
+	Federation FederationConfig
+}
+
+type MOTDConfig struct {
+	Enabled bool
+	DBPath  string
+	Text    string
+	ISSI    uint32
+}
+
+type SIPConfig struct {
+	Enabled            bool
+	GatewayISSI        uint32
+	BrewISSI           uint32
+	BindAddr           string
+	ServerAddr         string
+	Domain             string
+	LocalUser          string
+	Username           string
+	Password           string
+	Transport          string
+	RTPPortStart       int
+	RTPBindAddr        string
+	RTPAdvertiseIP     string
+	RTPTimestampStep   uint32
+	ACELPPayloadType   uint8
+	RegisterEnabled    bool
+	RegisterExpires    int
+	ReconnectDelay     time.Duration
+	ReleaseCause       uint8
+	InboundDefaultISSI uint32
+}
+
+type FederationConfig struct {
+	Enabled bool
+	Name    string   // This server's name (shown to peers)
+	Key     string   // Shared key for peer authentication
+	Peers   []string // Peer URLs (wss://...)
 }
 
 type ServerConfig struct {
@@ -223,6 +263,40 @@ func LoadFromEnv() (Config, error) {
 			ReconnectDelay:          envDuration("ZELLO_RECONNECT_DELAY", 5*time.Second),
 			PingInterval:            envDuration("ZELLO_PING_INTERVAL", 10*time.Second),
 			ResponseTimeout:         envDuration("ZELLO_RESPONSE_TIMEOUT", 10*time.Second),
+		},
+		MOTD: MOTDConfig{
+			Enabled: envBool("MOTD_ENABLED", false),
+			DBPath:  env("MOTD_DB_PATH", "motd_seen.json"),
+			Text:    env("MOTD_TEXT", ""),
+			ISSI:    uint32(envInt("MOTD_ISSI", 0)),
+		},
+		SIP: SIPConfig{
+			Enabled:            envBool("SIP_ENABLED", false),
+			GatewayISSI:        uint32(envInt("SIP_GATEWAY_ISSI", 0)),
+			BrewISSI:           uint32(envInt("SIP_BREW_ISSI", 0)),
+			BindAddr:           env("SIP_BIND_ADDR", "0.0.0.0:5060"),
+			ServerAddr:         env("SIP_SERVER_ADDR", ""),
+			Domain:             env("SIP_DOMAIN", ""),
+			LocalUser:          env("SIP_LOCAL_USER", "brew"),
+			Username:           env("SIP_USERNAME", ""),
+			Password:           env("SIP_PASSWORD", ""),
+			Transport:          env("SIP_TRANSPORT", "udp"),
+			RTPPortStart:       envInt("SIP_RTP_PORT_START", 10000),
+			RTPBindAddr:        env("SIP_RTP_BIND_ADDR", "0.0.0.0"),
+			RTPAdvertiseIP:     env("SIP_RTP_ADVERTISE_IP", ""),
+			RTPTimestampStep:   uint32(envInt("SIP_RTP_TIMESTAMP_STEP", 160)),
+			ACELPPayloadType:   uint8(envInt("SIP_ACELP_PAYLOAD_TYPE", 96)),
+			RegisterEnabled:    envBool("SIP_REGISTER_ENABLED", false),
+			RegisterExpires:    envInt("SIP_REGISTER_EXPIRES", 3600),
+			ReconnectDelay:     envDuration("SIP_RECONNECT_DELAY", 5*time.Second),
+			ReleaseCause:       uint8(envInt("SIP_RELEASE_CAUSE", 0)),
+			InboundDefaultISSI: uint32(envInt("SIP_INBOUND_DEFAULT_ISSI", 0)),
+		},
+		Federation: FederationConfig{
+			Enabled: envBool("FEDERATION_ENABLED", false),
+			Name:    env("FEDERATION_NAME", ""),
+			Key:     env("FEDERATION_KEY", ""),
+			Peers:   envCSV("FEDERATION_PEERS"),
 		},
 		Echo: EchoConfig{
 			Talkgroup:     uint32(envInt("ECHO_TALKGROUP", 10002)),
