@@ -174,7 +174,25 @@ func (s *Service) registerRadioIDHandlers() {
 	s.server.RegisterHTTPHandler("/api/radioid/lookup", s.handleRadioIDLookup)
 }
 
+// isLocalRequest checks if a request originates from localhost.
+// Checks X-Real-IP (set by nginx) first, then falls back to RemoteAddr.
+func isLocalRequest(r *http.Request) bool {
+	// If behind reverse proxy, check the real client IP
+	realIP := r.Header.Get("X-Real-IP")
+	if realIP != "" {
+		return realIP == "127.0.0.1" || realIP == "::1"
+	}
+	host := r.RemoteAddr
+	return strings.HasPrefix(host, "127.0.0.1:") ||
+		strings.HasPrefix(host, "[::1]:") ||
+		strings.HasPrefix(host, "localhost:")
+}
+
 func (s *Service) handleRadioIDUsers(w http.ResponseWriter, r *http.Request) {
+	if !isLocalRequest(r) {
+		http.Error(w, "forbidden — admin API only accessible from localhost", http.StatusForbidden)
+		return
+	}
 	if s.radioIDAuth == nil {
 		http.Error(w, "RadioID auth not enabled", http.StatusNotFound)
 		return
@@ -190,6 +208,10 @@ func (s *Service) handleRadioIDUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRadioIDBlock(w http.ResponseWriter, r *http.Request) {
+	if !isLocalRequest(r) {
+		http.Error(w, "forbidden — admin API only accessible from localhost", http.StatusForbidden)
+		return
+	}
 	if s.radioIDAuth == nil {
 		http.Error(w, "RadioID auth not enabled", http.StatusNotFound)
 		return
@@ -212,6 +234,10 @@ func (s *Service) handleRadioIDBlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRadioIDLookup(w http.ResponseWriter, r *http.Request) {
+	if !isLocalRequest(r) {
+		http.Error(w, "forbidden — admin API only accessible from localhost", http.StatusForbidden)
+		return
+	}
 	if s.radioIDAuth == nil {
 		http.Error(w, "RadioID auth not enabled", http.StatusNotFound)
 		return

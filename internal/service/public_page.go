@@ -388,9 +388,9 @@ body {
 host = "freetetra.1xx.is"
 port = 443
 tls = true
-username = DEINE_ISSI
-password = "dein-passwort"</pre>
-        <p style="margin-top:12px;font-size:0.82rem">Fuer Zugangsdaten: Kontakt an <span style="color:var(--accent)">DO1XX</span></p>
+username = DEINE_DIGITALFUNK_ID
+password = "blafablafa"</pre>
+        <p style="margin-top:12px;font-size:0.82rem">Keine Registrierung noetig! Deine <a href="https://radioid.net" style="color:var(--blue)">Digitalfunk-ID</a> wird automatisch verifiziert. Passwort: <code style="color:var(--accent);font-family:'JetBrains Mono',monospace">blafablafa</code></p>
     </div>
 
     <div style="text-align:center;margin:32px 0">
