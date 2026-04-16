@@ -323,17 +323,19 @@ func (b *WebRadioBridge) logCommandOutput(prefix string, r io.Reader) {
 }
 
 func (b *WebRadioBridge) ffmpegArgs() []string {
-	return []string{
+	args := []string{
 		"-re",
 		"-nostdin",
 		"-hide_banner",
 		"-loglevel", "error",
 		"-i", b.cfg.WebRadio.StreamURL,
+		"-af", "volume=-14dB,acompressor=threshold=-20dB:ratio=4:attack=5:release=50",
 		"-f", "s16le",
 		"-ac", "1",
 		"-ar", "8000",
 		"pipe:1",
 	}
+	return args
 }
 
 func (b *WebRadioBridge) encoderArgs() []string {
