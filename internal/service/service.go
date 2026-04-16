@@ -49,6 +49,7 @@ type Service struct {
 	positionStore *PositionStore
 	aprsBridge    *APRSBridge
 	radioIDAuth   *RadioIDAuth
+	rateLimiter   *AuthRateLimiter
 }
 
 type activeCall struct {
@@ -93,7 +94,21 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 		s.motdStore = store
 	}
 	s.positionStore = newPositionStore(logger)
+	s.rateLimiter = newAuthRateLimiter()
 	s.server = brew.NewServer(cfg, logger, s)
+
+	// Rate limiting for auth attempts
+	s.server.SetAuthRateLimiter(
+		func(ip string) bool { return !s.rateLimiter.IsBanned(ip) },
+		func(ip string) {
+			if s.rateLimiter.RecordFailure(ip) {
+				logger.Printf("AUTH: IP %s BANNED after %d failed attempts", ip, maxAuthAttempts)
+			} else {
+				logger.Printf("AUTH: failed attempt from %s", ip)
+			}
+		},
+		func(ip string) { s.rateLimiter.RecordSuccess(ip) },
+	)
 
 	if cfg.RadioID.AuthEnabled {
 		s.radioIDAuth = newRadioIDAuth(logger)

@@ -47,8 +47,11 @@ type Server struct {
 	tokenMu sync.Mutex
 	tokens  map[string]time.Time
 
-	extraHandlers []httpHandlerRegistration
-	authVerifier  AuthVerifier
+	extraHandlers  []httpHandlerRegistration
+	authVerifier   AuthVerifier
+	authChecker    func(ip string) bool // returns false if IP is banned
+	authOnFailure  func(ip string)      // called on auth failure
+	authOnSuccess  func(ip string)      // called on auth success
 }
 
 type httpHandlerRegistration struct {
@@ -195,9 +198,28 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.authEnabled() {
+		clientIP := r.Header.Get("X-Real-IP")
+		if clientIP == "" {
+			clientIP = strings.Split(r.RemoteAddr, ":")[0]
+		}
+
+		// Check if IP is banned
+		if s.authChecker != nil && !s.authChecker(clientIP) {
+			s.logger.Printf("auth BANNED ip=%s", clientIP)
+			http.Error(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+			return
+		}
+
 		if !s.authorizeRequest(r) {
+			if s.authOnFailure != nil {
+				s.authOnFailure(clientIP)
+			}
 			s.issueDigestChallenge(w)
 			return
+		}
+
+		if s.authOnSuccess != nil {
+			s.authOnSuccess(clientIP)
 		}
 	}
 
@@ -370,9 +392,15 @@ func (s *Server) snapshotClients() []*Client {
 }
 
 // SetAuthVerifier sets a custom auth verifier function.
-// When set, any username is accepted if the verifier returns true.
 func (s *Server) SetAuthVerifier(v AuthVerifier) {
 	s.authVerifier = v
+}
+
+// SetAuthRateLimiter sets callbacks for rate limiting auth attempts.
+func (s *Server) SetAuthRateLimiter(checker func(string) bool, onFail func(string), onSuccess func(string)) {
+	s.authChecker = checker
+	s.authOnFailure = onFail
+	s.authOnSuccess = onSuccess
 }
 
 func (s *Server) authEnabled() bool {
