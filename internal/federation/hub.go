@@ -34,6 +34,21 @@ type CallHandler interface {
 	GetLocalSubscribers() map[uint32][]uint32
 }
 
+// FreeTetra GSSI Schema:
+//   1-4:   Local (voice, no services)
+//   5-22:  Local (services: radio, echo, etc.)
+//   23-90: Federation (shared between servers)
+//   91+:   Reserved (future DMR bridge)
+const (
+	federationGSSIMin uint32 = 23
+	federationGSSIMax uint32 = 90
+)
+
+// isFederatedGSSI returns true if a GSSI should be shared between servers.
+func isFederatedGSSI(gssi uint32) bool {
+	return gssi >= federationGSSIMin && gssi <= federationGSSIMax
+}
+
 // Hub manages all federation peer connections.
 type Hub struct {
 	serverName string
@@ -337,19 +352,34 @@ func (h *Hub) BroadcastSubscriber(issi uint32, action string, gssis []uint32) {
 }
 
 // BroadcastAffiliate notifies all peers about an affiliation change.
+// Only federated GSSIs (23-90) are shared.
 func (h *Hub) BroadcastAffiliate(issi uint32, action string, gssis []uint32) {
+	// Filter to only federated GSSIs
+	fedGSSIs := make([]uint32, 0, len(gssis))
+	for _, g := range gssis {
+		if isFederatedGSSI(g) {
+			fedGSSIs = append(fedGSSIs, g)
+		}
+	}
+	if len(fedGSSIs) == 0 {
+		return
+	}
 	msg := &Message{
 		Type:   MsgAffiliateUpdate,
 		Origin: h.serverName,
 		ISSI:   issi,
 		Action: action,
-		GSSIs:  gssis,
+		GSSIs:  fedGSSIs,
 	}
 	h.broadcastToAllPeers(msg)
 }
 
 // BroadcastCallStart notifies peers that have subscribers on the target GSSI.
+// Only federated GSSIs (23-90) are shared between servers.
 func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, priority uint8, service uint16) {
+	if !isFederatedGSSI(destGSSI) {
+		return
+	}
 	msg := &Message{
 		Type:       MsgCallStart,
 		Origin:     h.serverName,

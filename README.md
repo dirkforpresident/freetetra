@@ -74,6 +74,30 @@ password = "blafablafa"
 Keine Registrierung noetig — die Digitalfunk-ID (ISSI) wird automatisch
 ueber die [RadioID](https://radioid.net) API verifiziert.
 
+## GSSI-Schema
+
+Einheitliches Talkgroup-Schema fuer alle FreeTetra-Server:
+
+```
+GSSI  1 -  4    Lokal (Sprache) — nur auf dieser Zelle, keine Services
+GSSI  5 - 22    Lokal (Services) — Radio, Echo, Ansagen, Tests
+GSSI 23 - 90    Federation — werden zwischen Servern geteilt
+GSSI 91+        Reserviert — spaeter evtl. DMR-Bridge
+```
+
+| GSSI | Typ | Beschreibung |
+|---|---|---|
+| 1-4 | Lokal | Freie Sprach-Talkgroups (nur diese Zelle) |
+| 5 | Lokal | Frei |
+| 6 | Service | Webradio (z.B. Deutschlandfunk) |
+| 7-21 | Service | Frei fuer lokale Dienste |
+| 22 | Service | Echo / Papagei |
+| 23-90 | Federation | Geteilte Talkgroups (alle Server) |
+| 91+ | Reserviert | Geplant: DMR-Bridge |
+
+Server-Betreiber koennen GSSI 5-21 frei fuer eigene lokale Services nutzen.
+Federation-GSSIs (23-90) sind netzweit einheitlich — gleiche Nummer, gleiche Bedeutung.
+
 ---
 
 ## Features
