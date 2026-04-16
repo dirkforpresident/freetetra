@@ -195,7 +195,6 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 	currentCallID := callID
 	activeCallID := uuid.Nil
 	callStarted := false
-	waitingLogged := false
 
 	for {
 		if ctx.Err() != nil {
@@ -217,36 +216,13 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 			continue
 		}
 
-		subs := b.plane.GroupSubscriberCount(b.cfg.WebRadio.Talkgroup)
-		if callStarted && subs == 0 {
-			b.logger.Printf(
-				"webradio no subscribers on tg=%d; stopping active call=%s",
-				b.cfg.WebRadio.Talkgroup,
-				currentCallID.String(),
-			)
-			b.plane.ReleaseInjectedCall("webradio", currentCallID, b.cfg.WebRadio.ReleaseCause)
-			callStarted = false
-			activeCallID = uuid.Nil
-			currentCallID = uuid.New()
-		}
-
 		if !callStarted {
-			if subs == 0 {
-				if !waitingLogged {
-					waitingLogged = true
-					b.logger.Printf(
-						"webradio waiting for subscribers on tg=%d before opening call",
-						b.cfg.WebRadio.Talkgroup,
-					)
-				}
-				continue
-			}
 			if !b.plane.StartInjectedCall("webradio", currentCallID, b.cfg.WebRadio.SourceISSI, b.cfg.WebRadio.Talkgroup) {
 				continue
 			}
 			callStarted = true
 			activeCallID = currentCallID
-			waitingLogged = false
+			b.logger.Printf("webradio call started on tg=%d call=%s", b.cfg.WebRadio.Talkgroup, currentCallID.String())
 		}
 
 		b.plane.InjectedVoiceFrame("webradio", currentCallID, ste)
