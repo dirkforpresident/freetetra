@@ -329,6 +329,29 @@ body {
     </div>
 
     <div class="card">
+        <h2>SDS senden</h2>
+        <p style="margin-bottom:16px;color:var(--text-dim)">Textnachricht an eine ISSI im Netz. Die Nachricht geht als SDS an das Funkgeraet.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div style="flex:1;min-width:140px">
+                <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.08em">Von ISSI</label>
+                <input id="sds-from" type="number" placeholder="Deine ISSI" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace">
+            </div>
+            <div style="flex:1;min-width:140px">
+                <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.08em">An ISSI</label>
+                <input id="sds-to" type="number" placeholder="Ziel ISSI" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace">
+            </div>
+        </div>
+        <div style="margin-top:8px">
+            <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.08em">Nachricht</label>
+            <input id="sds-text" type="text" placeholder="Text..." maxlength="140" style="width:100%;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text)" onkeydown="if(event.key==='Enter'){sendSDS()}">
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            <button onclick="sendSDS()" class="btn btn-accent">Senden</button>
+            <span id="sds-status" style="font-size:0.82rem;color:var(--text-dim)"></span>
+        </div>
+    </div>
+
+    <div class="card">
         <h2>Server verbinden</h2>
         <p>BlueStation-Config — einfach den Brew-Host auf diesen Server zeigen:</p>
         <pre style="background:var(--bg);padding:16px;border-radius:8px;border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:var(--accent);overflow-x:auto;margin-top:8px">[brew]
@@ -364,6 +387,52 @@ function update() {
 }
 update();
 setInterval(update, 10000);
+
+function sendSDS() {
+    const from = document.getElementById("sds-from").value.trim();
+    const to = document.getElementById("sds-to").value.trim();
+    const text = document.getElementById("sds-text").value.trim();
+    const status = document.getElementById("sds-status");
+
+    if (!from || !to || !text) {
+        status.style.color = "var(--red)";
+        status.textContent = "Bitte alle Felder ausfuellen";
+        return;
+    }
+
+    status.style.color = "var(--text-dim)";
+    status.textContent = "Sende...";
+
+    const url = "/api/sds/send?from=" + encodeURIComponent(from)
+              + "&to=" + encodeURIComponent(to)
+              + "&text=" + encodeURIComponent(text);
+
+    fetch(url)
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                status.style.color = "var(--accent)";
+                status.textContent = "Gesendet an " + to + " ueber " + (d.via || "local");
+                document.getElementById("sds-text").value = "";
+                setTimeout(() => { status.textContent = ""; }, 4000);
+            } else {
+                status.style.color = "var(--red)";
+                status.textContent = "Fehler: " + (d.error || "unbekannt");
+            }
+        })
+        .catch(e => {
+            status.style.color = "var(--red)";
+            status.textContent = "Fehler: " + e;
+        });
+}
+
+// Save "from ISSI" in localStorage so user doesn't have to type it every time
+const fromField = document.getElementById("sds-from");
+const savedFrom = localStorage.getItem("freetetra-sds-from");
+if (savedFrom) fromField.value = savedFrom;
+fromField.addEventListener("change", () => {
+    localStorage.setItem("freetetra-sds-from", fromField.value);
+});
 </script>
 </body>
 </html>`
