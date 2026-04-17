@@ -52,10 +52,6 @@ func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 		"clients":     clientCount,
 		"subscribers": subscriberCount,
 		"positions":   len(positions),
-		"services": []map[string]any{
-			{"tg": 24, "name": "Webradio", "description": "Deutschlandfunk (DLF)"},
-			{"tg": 25, "name": "Echo", "description": "Papagei / Loopback Test"},
-		},
 	})
 }
 
@@ -337,31 +333,6 @@ body {
     </div>
 
     <div class="card">
-    </div>
-
-    <div class="card">
-        <h2>Services</h2>
-        <p>Verfuegbare Dienste auf diesem Server:</p>
-        <div class="services" id="services">
-            <div class="svc">
-                <div>
-                    <div class="svc-tg">TG 24</div>
-                </div>
-                <div>
-                    <div class="svc-name">Webradio</div>
-                    <div class="svc-desc">Deutschlandfunk (DLF) — Dauersendung</div>
-                </div>
-            </div>
-            <div class="svc">
-                <div>
-                    <div class="svc-tg">TG 25</div>
-                </div>
-                <div>
-                    <div class="svc-name">Echo / Papagei</div>
-                    <div class="svc-desc">Spricht zurueck was du sendest</div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <div class="card">
