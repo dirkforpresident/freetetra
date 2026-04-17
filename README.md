@@ -1,18 +1,16 @@
 # FreeTetra
 
-Freier, foederierter TETRA-Brew-Server fuer Amateurfunk.
-
-Verbindet [BlueStation](https://github.com/MidnightBlueLabs/tetra-bluestation)-Basisstationen
-ueber das Brew-Protokoll und ermoeglicht **Federation** zwischen unabhaengigen Servern.
+Freies, foederiertes TETRA-Netz fuer Amateurfunk.
 
 ## Was ist das?
 
-FreeTetra ist ein Brew-Server mit Federation — wie E-Mail, aber fuer TETRA-Funk:
+FreeTetra ist ein offenes TETRA-Funknetz. Mehrere unabhaengige Server sind
+untereinander verbunden (foederiert) — wie bei E-Mail. Egal bei welchem Server
+du bist, du erreichst alle anderen. Kein zentraler Betreiber, kein Machthaber.
 
-- Jeder Funkamateur kann seinen eigenen Server betreiben
-- Server peeren untereinander und tauschen Subscriber/Calls aus
-- Kein zentraler Server, kein Machthaber
-- BlueStations verbinden sich zu einem beliebigen Server und erreichen alle
+**Du brauchst keinen eigenen Server um mitzumachen.** Verbinde deine BlueStation
+einfach mit einem bestehenden FreeTetra-Server. Wenn du willst, kannst du
+spaeter auch einen eigenen betreiben — aber du musst nicht.
 
 ```
 Server DO0RAM  <--peer-->  Server DO0XYZ  <--peer-->  Server DL0ABC
@@ -23,13 +21,26 @@ Server DO0RAM  <--peer-->  Server DO0XYZ  <--peer-->  Server DL0ABC
 ## Wie mitmachen?
 
 ### Stufe 1: Funkgeraet einbuchen
-Einfach bei einer BlueStation in deiner Naehe einbuchen. Fertig.
+Einfach bei einem FreeTetra-Repeater in deiner Naehe einbuchen.
+Fertig — du bist im Netz und erreichst alle.
 
-### Stufe 2: Eigene BlueStation aufstellen
-Raspberry Pi + SDR + Antenne. Erweitert die Abdeckung fuer alle in deiner Region.
+### Stufe 2: Eigenen Repeater aufstellen
+Du willst die Abdeckung in deiner Region erweitern? Eine
+[BlueStation](https://github.com/MidnightBlueLabs/tetra-bluestation) ist
+der Einstieg — Raspberry Pi + SDR + Antenne. Damit hast du einen Zimmer-Hotspot
+den du an einen bestehenden FreeTetra-Server anbindest.
 
-### Stufe 3: Eigener Server betreiben
-FreeTetra-Server aufsetzen, mit anderen peeren. Werde Teil der Federation.
+Fuer einen richtigen Repeater mit Reichweite und Dauerbetrieb braucht es mehr:
+Bandpassfilter, Endstufe (PA), Duplexer, wetterfestes Gehaeuse, Aussenmontage.
+Das ist kein Muss, aber wer die Erfahrung hat kann damit eine vollwertige
+TETRA-Zelle mit mehreren Kilometern Reichweite aufbauen.
+
+### Stufe 3: Eigenen Server betreiben (optional)
+Du willst deine eigene Infrastruktur kontrollieren? Setze einen eigenen
+FreeTetra-Server auf und verbinde ihn mit dem Netz. Deine BlueStations
+verbinden sich dann zu deinem Server, und dein Server peert automatisch
+mit den anderen. Dafuer brauchst du einen Linux-Server (VPS, Raspberry Pi,
+oder ein Rechner zuhause).
 
 ## Schnellstart (Server)
 
