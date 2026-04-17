@@ -35,12 +35,11 @@ type CallHandler interface {
 }
 
 // FreeTetra GSSI Schema:
-//   1-4:   Local (voice, no services)
-//   5-22:  Local (services: radio, echo, etc.)
-//   23-90: Federation (shared between servers)
+//   1-4:   Local (voice only, not forwarded)
+//   5-90:  FreeTetra (shared between all servers)
 //   91+:   Reserved (future DMR bridge)
 const (
-	federationGSSIMin uint32 = 23
+	federationGSSIMin uint32 = 5
 	federationGSSIMax uint32 = 90
 )
 

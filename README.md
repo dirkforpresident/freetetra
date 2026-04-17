@@ -90,24 +90,23 @@ ueber die [RadioID](https://radioid.net) API verifiziert.
 Einheitliches Talkgroup-Schema fuer alle FreeTetra-Server:
 
 ```
-GSSI  1 -  4    Lokal (Sprache) — nur auf dieser Zelle, keine Services
-GSSI  5 - 22    Lokal (Services) — Radio, Echo, Ansagen, Tests
-GSSI 23 - 90    Federation — werden zwischen Servern geteilt
-GSSI 91+        Reserviert — spaeter evtl. DMR-Bridge
+GSSI  1 -  4    Lokal — nur auf dieser Zelle, wird nicht weitergeleitet
+GSSI  5 - 90    FreeTetra — wird zwischen allen Servern geteilt
+GSSI 91+        Reserviert — spaeter fuer Bridges (z.B. DMR)
 ```
 
 | GSSI | Typ | Beschreibung |
 |---|---|---|
-| 1-4 | Lokal | Freie Sprach-Talkgroups (nur diese Zelle) |
-| 5 | Lokal | Frei |
-| 6 | Service | Webradio (z.B. Deutschlandfunk) |
-| 7-21 | Service | Frei fuer lokale Dienste |
-| 22 | Service | Echo / Papagei |
-| 23-90 | Federation | Geteilte Talkgroups (alle Server) |
+| 1-4 | Lokal | Sprache nur auf dieser Zelle |
+| 5-22 | FreeTetra | Frei fuer Services (Radio, Echo, Ansagen, ...) |
+| 23 | FreeTetra | SomaFM DEF CON Radio |
+| 24 | FreeTetra | Deutschlandfunk (DLF) |
+| 25 | FreeTetra | Echo / Papagei |
+| 26-90 | FreeTetra | Frei fuer gemeinsame Nutzung |
 | 91+ | Reserviert | Geplant: DMR-Bridge |
 
-Server-Betreiber koennen GSSI 5-21 frei fuer eigene lokale Services nutzen.
-Federation-GSSIs (23-90) sind netzweit einheitlich — gleiche Nummer, gleiche Bedeutung.
+Alle GSSIs von 5-90 werden automatisch zwischen allen verbundenen Servern
+geteilt. Ein Gespraech auf TG 30 ist auf jedem FreeTetra-Server hoerbar.
 
 ---
 
