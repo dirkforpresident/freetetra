@@ -418,21 +418,30 @@ function sendSDS() {
         return;
     }
     msg.style.color = "var(--text-dim)"; msg.textContent = "Sende...";
-    fetch("/api/sds/send?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to) + "&text=" + encodeURIComponent(text))
-        .then(r => r.json())
-        .then(d => {
-            if (d.ok) {
-                msg.style.color = "var(--accent)";
-                msg.textContent = "Gesendet an " + to;
-                document.getElementById("sds-text").value = "";
-                setTimeout(() => msg.textContent = "", 3000);
-            } else {
-                msg.style.color = "var(--red)";
-                msg.textContent = "Fehler: " + (d.error || "unbekannt");
-            }
-        }).catch(e => {
-            msg.style.color = "var(--red)"; msg.textContent = "Fehler: " + e;
-        });
+    fetch("/api/sds/send", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            source_issi: parseInt(from),
+            destination: parseInt(to),
+            destination_type: "subscriber",
+            sds_type: "text",
+            text: text
+        })
+    }).then(async r => {
+        if (r.ok) {
+            msg.style.color = "var(--accent)";
+            msg.textContent = "Gesendet an " + to;
+            document.getElementById("sds-text").value = "";
+            setTimeout(() => msg.textContent = "", 3000);
+        } else {
+            const t = await r.text();
+            msg.style.color = "var(--red)";
+            msg.textContent = "Fehler: " + t;
+        }
+    }).catch(e => {
+        msg.style.color = "var(--red)"; msg.textContent = "Fehler: " + e;
+    });
 }
 
 // Load activity feed from dashboard snapshot
