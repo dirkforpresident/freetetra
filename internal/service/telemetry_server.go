@@ -266,7 +266,6 @@ func (ts *TelemetryServer) Snapshot() []map[string]any {
 		}
 		out = append(out, map[string]any{
 			"name":             c.Name,
-			"ip":               c.RemoteIP,
 			"connected_at":     c.ConnectedAt,
 			"last_activity":    c.LastActivity,
 			"subscriber_count": len(c.subscribers),
@@ -283,10 +282,6 @@ func (s *Service) registerTelemetryServer() {
 	}
 	s.server.RegisterHTTPHandler("/telemetry", s.telemetry.handleConnection)
 	s.server.RegisterHTTPHandler("/api/telemetry/clients", func(w http.ResponseWriter, r *http.Request) {
-		if !isLocalRequest(r) {
-			http.Error(w, "localhost only", http.StatusForbidden)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"clients": s.telemetry.Snapshot(),

@@ -201,10 +201,6 @@ func isLocalRequest(r *http.Request) bool {
 }
 
 func (s *Service) handleRadioIDUsers(w http.ResponseWriter, r *http.Request) {
-	if !isLocalRequest(r) {
-		http.Error(w, "forbidden — admin API only accessible from localhost", http.StatusForbidden)
-		return
-	}
 	if s.radioIDAuth == nil {
 		http.Error(w, "RadioID auth not enabled", http.StatusNotFound)
 		return
@@ -219,9 +215,10 @@ func (s *Service) handleRadioIDUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleRadioIDBlock is localhost-only (admin action).
 func (s *Service) handleRadioIDBlock(w http.ResponseWriter, r *http.Request) {
 	if !isLocalRequest(r) {
-		http.Error(w, "forbidden — admin API only accessible from localhost", http.StatusForbidden)
+		http.Error(w, "forbidden — admin API only accessible from localhost (use SSH)", http.StatusForbidden)
 		return
 	}
 	if s.radioIDAuth == nil {
@@ -246,10 +243,6 @@ func (s *Service) handleRadioIDBlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRadioIDLookup(w http.ResponseWriter, r *http.Request) {
-	if !isLocalRequest(r) {
-		http.Error(w, "forbidden — admin API only accessible from localhost", http.StatusForbidden)
-		return
-	}
 	if s.radioIDAuth == nil {
 		http.Error(w, "RadioID auth not enabled", http.StatusNotFound)
 		return
