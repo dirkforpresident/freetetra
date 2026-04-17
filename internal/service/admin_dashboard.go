@@ -269,26 +269,6 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 </div>
 
 <div class="card">
-    <h2>SDS senden</h2>
-    <div class="sds-form">
-        <div class="field">
-            <label>Von ISSI</label>
-            <input id="sds-from" type="number" class="mono" placeholder="9999999" value="9999999">
-        </div>
-        <div class="field">
-            <label>An ISSI</label>
-            <input id="sds-to" type="number" class="mono" placeholder="2623563">
-        </div>
-        <div class="field-text">
-            <label>Text</label>
-            <input id="sds-text" type="text" placeholder="Nachricht..." maxlength="140" onkeydown="if(event.key==='Enter')sendSDS()">
-        </div>
-        <button class="btn btn-accent" onclick="sendSDS()">Senden</button>
-    </div>
-    <div class="msg" id="sds-msg"></div>
-</div>
-
-<div class="card">
     <h2>Aktivitaet <span class="live"></span></h2>
     <div class="activity" id="activity"></div>
 </div>
@@ -406,42 +386,6 @@ async function update() {
     } catch (e) {
         console.error(e);
     }
-}
-
-function sendSDS() {
-    const from = document.getElementById("sds-from").value.trim();
-    const to = document.getElementById("sds-to").value.trim();
-    const text = document.getElementById("sds-text").value.trim();
-    const msg = document.getElementById("sds-msg");
-    if (!from || !to || !text) {
-        msg.style.color = "var(--red)"; msg.textContent = "Bitte alle Felder ausfuellen";
-        return;
-    }
-    msg.style.color = "var(--text-dim)"; msg.textContent = "Sende...";
-    fetch("/api/sds/send", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            source_issi: parseInt(from),
-            destination: parseInt(to),
-            destination_type: "subscriber",
-            sds_type: "flash",
-            text: text
-        })
-    }).then(async r => {
-        if (r.ok) {
-            msg.style.color = "var(--accent)";
-            msg.textContent = "Gesendet an " + to;
-            document.getElementById("sds-text").value = "";
-            setTimeout(() => msg.textContent = "", 3000);
-        } else {
-            const t = await r.text();
-            msg.style.color = "var(--red)";
-            msg.textContent = "Fehler: " + t;
-        }
-    }).catch(e => {
-        msg.style.color = "var(--red)"; msg.textContent = "Fehler: " + e;
-    });
 }
 
 // Load activity feed from dashboard snapshot
