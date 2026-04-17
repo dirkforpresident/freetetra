@@ -53,8 +53,8 @@ func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 		"subscribers": subscriberCount,
 		"positions":   len(positions),
 		"services": []map[string]any{
-			{"tg": 6, "name": "Webradio", "description": "Deutschlandfunk (DLF)"},
-			{"tg": 22, "name": "Echo", "description": "Papagei / Loopback Test"},
+			{"tg": 24, "name": "Webradio", "description": "Deutschlandfunk (DLF)"},
+			{"tg": 25, "name": "Echo", "description": "Papagei / Loopback Test"},
 		},
 	})
 }
@@ -345,7 +345,7 @@ body {
         <div class="services" id="services">
             <div class="svc">
                 <div>
-                    <div class="svc-tg">TG 6</div>
+                    <div class="svc-tg">TG 24</div>
                 </div>
                 <div>
                     <div class="svc-name">Webradio</div>
@@ -354,7 +354,7 @@ body {
             </div>
             <div class="svc">
                 <div>
-                    <div class="svc-tg">TG 22</div>
+                    <div class="svc-tg">TG 25</div>
                 </div>
                 <div>
                     <div class="svc-name">Echo / Papagei</div>
