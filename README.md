@@ -63,13 +63,14 @@ password = "blafablafa"
 
 ## GSSI scheme
 
-Enforced in code. Same across all FreeTetra servers.
-
 ```
-1 - 4     local (not forwarded)
+1 - 4     local (not forwarded between servers)
 5 - 90    federation (shared across all peered servers)
 91+       reserved (future DMR bridge)
 ```
+
+Enforced in code. Local GSSIs stay on the originating cell; federated
+GSSIs are mesh-relayed to all connected peers.
 
 ## Federation
 
@@ -111,10 +112,10 @@ Peers without internet automatically download the DB from connected peers
 that have it. One internet-connected seed is enough for a whole HamNet
 cluster.
 
-Manual bans:
+Manual bans (localhost only, via SSH):
 
 ```
-GET /api/radioid/block?issi=XXX&action=block    # localhost only
+GET /api/radioid/block?issi=XXX&action=block
 ```
 
 ## APRS-IS
@@ -134,27 +135,28 @@ APRS_SERVER=euro.aprs2.net:14580
 Public (no auth):
 
 ```
-GET  /                           landing page
-GET  /ui                         admin dashboard (read-only)
-GET  /api/public/status          live counts
-GET  /api/positions              last position per ISSI
-GET  /api/telemetry/clients      connected BlueStations
-GET  /api/peers                  connected federation peers
-GET  /api/users.txt              local RadioID database (for peer sync)
+GET  /                       landing page
+GET  /ui                     admin dashboard (read-only)
+GET  /api/public/status      live counts
+GET  /api/positions          last position per ISSI
+GET  /api/telemetry/clients  connected BlueStations
+GET  /api/peers              connected federation peers
+GET  /api/users.txt          local RadioID database (for peer sync)
 ```
 
 Authenticated (by protocol):
 
 ```
-GET  /brew/                      BlueStation discovery (HTTP Digest + RadioID)
-WS   /                           telemetry (HTTP Basic + RadioID)
-WS   /peer/                      federation peer (shared key)
+GET  /brew/                  BlueStation discovery (HTTP Digest + RadioID)
+WS   /                       telemetry (HTTP Basic + RadioID)
+WS   /peer/                  federation peer (shared key)
 ```
 
-Localhost only (admin actions — use SSH):
+Localhost only (admin actions):
 
 ```
-GET  /api/radioid/block          ban/unban an ISSI
+GET  /api/radioid/block      ban/unban an ISSI
+GET  /api/radioid/users      list cached users
 ```
 
 ## Services (optional)
@@ -176,7 +178,7 @@ go build ./cmd/tetra-brew
 go build ./cmd/tetra-brew-webradio
 go build ./cmd/tetra-brew-echo
 
-# Build ACELP encoder for webradio
+# ACELP encoder for webradio
 gcc -Icodec/ -Ofast codec/encoder_stdio.c codec/codec/*.c -o tetra-acelp-stdio
 ```
 
