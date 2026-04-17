@@ -59,8 +59,12 @@ type SIPConfig struct {
 }
 
 type RadioIDConfig struct {
-	AuthEnabled bool   // Auto-authenticate via RadioID API
-	SharedKey   string // Shared password for all RadioID-verified users
+	AuthEnabled bool          // Auto-authenticate via RadioID API
+	SharedKey   string        // Shared password for all RadioID-verified users
+	Offline     bool          // Offline mode (no internet) — use only local users.txt
+	SyncOnStart bool          // Download full RadioID DB at startup (for offline usage)
+	SyncEvery   time.Duration // Re-sync interval (0 = only at start)
+	UsersFile   string        // Path to local users.txt (default: ./users.txt)
 }
 
 type APRSConfig struct {
@@ -282,6 +286,10 @@ func LoadFromEnv() (Config, error) {
 		RadioID: RadioIDConfig{
 			AuthEnabled: envBool("RADIOID_AUTH_ENABLED", false),
 			SharedKey:   env("RADIOID_SHARED_KEY", ""),
+			Offline:     envBool("RADIOID_OFFLINE_MODE", false),
+			SyncOnStart: envBool("RADIOID_SYNC_ON_START", false),
+			SyncEvery:   envDuration("RADIOID_SYNC_EVERY", 0),
+			UsersFile:   env("RADIOID_USERS_FILE", "users.txt"),
 		},
 		APRS: APRSConfig{
 			Enabled:  envBool("APRS_ENABLED", false),

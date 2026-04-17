@@ -113,7 +113,24 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	)
 
 	if cfg.RadioID.AuthEnabled {
-		s.radioIDAuth = newRadioIDAuth(logger)
+		s.radioIDAuth = newRadioIDAuth(logger, cfg.RadioID.Offline, cfg.RadioID.UsersFile)
+		if cfg.RadioID.SyncOnStart {
+			go func() {
+				if err := s.radioIDAuth.SyncLocalDB(); err != nil {
+					logger.Printf("RadioID: sync failed: %v", err)
+				}
+				// Periodic re-sync
+				if cfg.RadioID.SyncEvery > 0 {
+					ticker := time.NewTicker(cfg.RadioID.SyncEvery)
+					defer ticker.Stop()
+					for range ticker.C {
+						if err := s.radioIDAuth.SyncLocalDB(); err != nil {
+							logger.Printf("RadioID: sync failed: %v", err)
+						}
+					}
+				}
+			}()
+		}
 		sharedKey := cfg.RadioID.SharedKey
 		if sharedKey == "" {
 			sharedKey = cfg.Server.Password

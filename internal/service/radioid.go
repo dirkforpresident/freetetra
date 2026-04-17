@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,10 +15,16 @@ import (
 // RadioIDAuth provides automatic user authentication via the RadioID API.
 // Any ISSI registered at radioid.net (= licensed amateur radio operator)
 // is automatically allowed to connect. No manual account creation needed.
+//
+// In offline mode (HamNet, no internet), checks a local users.txt file
+// instead of the API. Format: one entry per line, "ISSI CALLSIGN".
 type RadioIDAuth struct {
 	logger    *log.Logger
 	cache     map[uint32]*radioIDEntry
 	blocklist map[uint32]bool
+	offline   bool              // No internet — use local users.txt
+	localFile string            // Path to users.txt
+	localDB   map[uint32]string // ISSI -> Callsign (loaded from users.txt)
 	mu        sync.RWMutex
 }
 
@@ -45,12 +53,108 @@ type radioIDResponse struct {
 	} `json:"results"`
 }
 
-func newRadioIDAuth(logger *log.Logger) *RadioIDAuth {
-	return &RadioIDAuth{
+func newRadioIDAuth(logger *log.Logger, offline bool, localFile string) *RadioIDAuth {
+	if localFile == "" {
+		localFile = "users.txt"
+	}
+	r := &RadioIDAuth{
 		logger:    logger,
 		cache:     make(map[uint32]*radioIDEntry),
 		blocklist: make(map[uint32]bool),
+		offline:   offline,
+		localFile: localFile,
+		localDB:   make(map[uint32]string),
 	}
+	r.loadLocalDB()
+	return r
+}
+
+// SyncLocalDB downloads the full RadioID user database and saves it locally.
+// This lets the server authenticate users even without internet.
+// Call this once (e.g. at startup or via cron) while online.
+func (r *RadioIDAuth) SyncLocalDB() error {
+	r.logger.Printf("RadioID: downloading full user database from radioid.net...")
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get("https://radioid.net/static/users.json")
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var dump struct {
+		Users []struct {
+			RadioID          int    `json:"radio_id"`
+			Callsign         string `json:"callsign"`
+			HasValidCallsign string `json:"has_valid_callsign"`
+		} `json:"users"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&dump); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+
+	// Write to users.txt (sorted, simple format)
+	f, err := os.Create(r.localFile)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", r.localFile, err)
+	}
+	defer f.Close()
+
+	fmt.Fprintln(f, "# FreeTetra local users database")
+	fmt.Fprintln(f, "# Auto-generated from radioid.net — do not edit manually")
+	fmt.Fprintln(f, "# Format: <ISSI> <CALLSIGN>")
+	fmt.Fprintf(f, "# Generated: %s\n", time.Now().Format(time.RFC3339))
+	count := 0
+	for _, u := range dump.Users {
+		if u.HasValidCallsign != "1" || u.Callsign == "" || u.RadioID == 0 {
+			continue
+		}
+		fmt.Fprintf(f, "%d %s\n", u.RadioID, strings.ToUpper(u.Callsign))
+		count++
+	}
+
+	r.logger.Printf("RadioID: saved %d users to %s", count, r.localFile)
+
+	// Reload into memory
+	r.mu.Lock()
+	r.localDB = make(map[uint32]string)
+	r.mu.Unlock()
+	r.loadLocalDB()
+	return nil
+}
+
+// loadLocalDB reads the users.txt file (fallback for offline mode).
+// Format: one entry per line, "<ISSI> <CALLSIGN>" (whitespace separated).
+// Lines starting with # are comments.
+func (r *RadioIDAuth) loadLocalDB() {
+	f, err := os.Open(r.localFile)
+	if err != nil {
+		if r.offline {
+			r.logger.Printf("RadioID: offline mode but %s not found — no users will be accepted", r.localFile)
+		}
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		var issi uint32
+		fmt.Sscanf(fields[0], "%d", &issi)
+		if issi == 0 {
+			continue
+		}
+		r.localDB[issi] = strings.ToUpper(fields[1])
+		count++
+	}
+	r.logger.Printf("RadioID: loaded %d local users from %s", count, r.localFile)
 }
 
 // Verify checks if an ISSI belongs to a licensed amateur radio operator.
@@ -61,6 +165,26 @@ func (r *RadioIDAuth) Verify(issi uint32) (string, bool) {
 	if r.blocklist[issi] {
 		r.mu.RUnlock()
 		r.logger.Printf("RadioID: ISSI %d is BLOCKED", issi)
+		return "", false
+	}
+
+	// Offline mode: check local users.txt only
+	if r.offline {
+		// Try full ISSI first, then strip trailing digits
+		for check := issi; check >= 1000000; check /= 10 {
+			if call, ok := r.localDB[check]; ok {
+				r.mu.RUnlock()
+				return call, true
+			}
+			if check == issi && len(r.localDB) > 0 {
+				// Only try truncation if we have entries at all
+				continue
+			} else {
+				break
+			}
+		}
+		r.mu.RUnlock()
+		r.logger.Printf("RadioID: offline mode — ISSI %d not in local users.txt", issi)
 		return "", false
 	}
 
@@ -107,7 +231,11 @@ func (r *RadioIDAuth) queryRadioID(issi uint32) *radioIDEntry {
 	resp, err := client.Get(url)
 	if err != nil {
 		r.logger.Printf("RadioID: API error for ISSI %d: %v", issi, err)
-		// On API error, allow (fail-open for availability)
+		// API unreachable — try local users.txt as fallback
+		if call, ok := r.localDB[issi]; ok {
+			return &radioIDEntry{ISSI: issi, Valid: true, Callsign: call, CachedAt: time.Now()}
+		}
+		// Fail-open if no local DB (availability > strict security)
 		return &radioIDEntry{ISSI: issi, Valid: true, Callsign: fmt.Sprintf("ISSI%d", issi), CachedAt: time.Now()}
 	}
 	defer resp.Body.Close()
