@@ -337,23 +337,6 @@ body {
     </div>
 
     <div class="card">
-        <div class="steps">
-            <div class="step">
-                <div class="step-num">1</div>
-                <h3>Einbuchen</h3>
-                <p>TETRA-Funkgeraet auf eine BlueStation in deiner Naehe einbuchen. Fertig — du bist im Netz.</p>
-            </div>
-            <div class="step">
-                <div class="step-num">2</div>
-                <h3>Abdeckung erweitern</h3>
-                <p>Eigene BlueStation aufstellen (Raspberry Pi + SDR + Antenne) und an einen bestehenden Server anbinden.</p>
-            </div>
-            <div class="step">
-                <div class="step-num">3</div>
-                <h3>Server betreiben</h3>
-                <p>Optional: Eigenen FreeTetra-Server aufsetzen und mit dem Netz verbinden. Fuer Leute die ihre eigene Infrastruktur wollen.</p>
-            </div>
-        </div>
     </div>
 
     <div class="card">
