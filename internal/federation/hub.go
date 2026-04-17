@@ -70,6 +70,9 @@ type Hub struct {
 	// Our own public URL for advertising to peers
 	selfURL string
 
+	// Mesh routing: deduplication and TTL
+	mesh *MeshRouter
+
 	upgrader websocket.Upgrader
 
 	ctx context.Context
@@ -86,6 +89,7 @@ func NewHub(serverName, peerKey, selfURL string, handler CallHandler, logger *lo
 		peers:       make(map[string]*Peer),
 		activeCalls: make(map[string]map[string]bool),
 		knownPeers:  make(map[string]string),
+		mesh:        newMeshRouter(serverName),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -232,15 +236,23 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		return
 	}
 
-	// Loop prevention
-	if msg.Origin == h.serverName {
-		return
+	// Mesh routing: check if we should process this message
+	switch msg.Type {
+	case MsgHello, MsgSyncRequest, MsgSyncResponse, MsgPeerExchange:
+		// Control messages: simple origin check, no mesh routing
+		if msg.Origin == h.serverName {
+			return
+		}
+	default:
+		// Data messages: full mesh dedup/TTL/loop check
+		if !h.mesh.ShouldProcess(&msg) {
+			return
+		}
 	}
 
 	switch msg.Type {
 	case MsgHello:
 		h.logger.Printf("federation: hello from %s (version %d)", msg.Origin, msg.Version)
-		// Send our known peers list
 		h.sendPeerExchange(peer)
 
 	case MsgSyncRequest:
@@ -255,74 +267,6 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		}
 		h.logger.Printf("federation: synced %d subscribers from %s", len(msg.Subscribers), peer.Name)
 
-	case MsgSubscriberUpdate:
-		switch msg.Action {
-		case "register":
-			peer.RegisterISSI(msg.ISSI)
-			peer.AffiliateISSI(msg.ISSI, msg.GSSIs)
-			h.logger.Printf("federation: %s registered ISSI %d (GSSIs=%v)", peer.Name, msg.ISSI, msg.GSSIs)
-		case "deregister":
-			peer.DeregisterISSI(msg.ISSI)
-			h.logger.Printf("federation: %s deregistered ISSI %d", peer.Name, msg.ISSI)
-		}
-		h.relayToPeers(&msg, peer.Name)
-
-	case MsgAffiliateUpdate:
-		switch msg.Action {
-		case "affiliate":
-			peer.AffiliateISSI(msg.ISSI, msg.GSSIs)
-			h.logger.Printf("federation: %s affiliated ISSI %d -> GSSIs %v", peer.Name, msg.ISSI, msg.GSSIs)
-		case "deaffiliate":
-			peer.DeaffiliateISSI(msg.ISSI, msg.GSSIs)
-			h.logger.Printf("federation: %s deaffiliated ISSI %d from GSSIs %v", peer.Name, msg.ISSI, msg.GSSIs)
-		}
-		h.relayToPeers(&msg, peer.Name)
-
-	case MsgCallStart:
-		// Track which peers are involved in this call
-		targets := h.findPeersForGSSI(msg.DestGSSI, peer.Name)
-		if len(targets) > 0 {
-			h.callMu.Lock()
-			if h.activeCalls[msg.UUID] == nil {
-				h.activeCalls[msg.UUID] = make(map[string]bool)
-			}
-			for _, t := range targets {
-				h.activeCalls[msg.UUID][t.Name] = true
-				t.SendJSON(&msg)
-			}
-			h.callMu.Unlock()
-		}
-		// Forward to local Brew service
-		if h.handler != nil {
-			h.handler.OnPeerCallStart(peer.Name, msg.UUID, msg.SourceISSI, msg.DestGSSI, msg.Priority, msg.Service)
-		}
-
-	case MsgCallEnd:
-		// Forward to peers in this call
-		h.callMu.Lock()
-		peerNames := h.activeCalls[msg.UUID]
-		delete(h.activeCalls, msg.UUID)
-		h.callMu.Unlock()
-
-		for name := range peerNames {
-			if name != peer.Name {
-				if p := h.getPeer(name); p != nil {
-					p.SendJSON(&msg)
-				}
-			}
-		}
-		// Forward to local Brew service
-		if h.handler != nil {
-			h.handler.OnPeerCallEnd(peer.Name, msg.UUID, msg.Cause)
-		}
-
-	case MsgSDSRelay:
-		if h.handler != nil {
-			h.handler.OnPeerSDSRelay(peer.Name, msg.SourceISSI, msg.DestISSI, msg.SDSData)
-		}
-		// If not deliverable locally, relay to other peers
-		h.relayToPeers(&msg, peer.Name)
-
 	case MsgPeerExchange:
 		newPeers := 0
 		for _, gp := range msg.Peers {
@@ -335,6 +279,92 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		}
 		if newPeers > 0 {
 			h.logger.Printf("federation: discovered %d new peer(s) via %s", newPeers, peer.Name)
+		}
+
+	case MsgSubscriberUpdate:
+		switch msg.Action {
+		case "register":
+			peer.RegisterISSI(msg.ISSI)
+			peer.AffiliateISSI(msg.ISSI, msg.GSSIs)
+			h.logger.Printf("federation: %s registered ISSI %d (GSSIs=%v) [ttl=%d path=%v]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL, msg.Path)
+		case "deregister":
+			peer.DeregisterISSI(msg.ISSI)
+			h.logger.Printf("federation: %s deregistered ISSI %d [ttl=%d]", peer.Name, msg.ISSI, msg.TTL)
+		}
+		// Mesh relay to all other peers
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.relayToPeers(relay, peer.Name)
+		}
+
+	case MsgAffiliateUpdate:
+		switch msg.Action {
+		case "affiliate":
+			peer.AffiliateISSI(msg.ISSI, msg.GSSIs)
+			h.logger.Printf("federation: %s affiliated ISSI %d -> GSSIs %v [ttl=%d]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL)
+		case "deaffiliate":
+			peer.DeaffiliateISSI(msg.ISSI, msg.GSSIs)
+			h.logger.Printf("federation: %s deaffiliated ISSI %d from GSSIs %v [ttl=%d]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL)
+		}
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.relayToPeers(relay, peer.Name)
+		}
+
+	case MsgCallStart:
+		// Forward to local Brew service
+		if h.handler != nil {
+			h.handler.OnPeerCallStart(peer.Name, msg.UUID, msg.SourceISSI, msg.DestGSSI, msg.Priority, msg.Service)
+		}
+		// Track call and relay to all other peers (mesh-wide)
+		h.callMu.Lock()
+		if h.activeCalls[msg.UUID] == nil {
+			h.activeCalls[msg.UUID] = make(map[string]bool)
+		}
+		h.callMu.Unlock()
+
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.mu.RLock()
+			for _, p := range h.peers {
+				if p.Name != peer.Name && !IsInPath(&msg, p.Name) {
+					p.SendJSON(relay)
+					h.callMu.Lock()
+					h.activeCalls[msg.UUID][p.Name] = true
+					h.callMu.Unlock()
+				}
+			}
+			h.mu.RUnlock()
+		}
+
+	case MsgCallEnd:
+		// Forward to local Brew service
+		if h.handler != nil {
+			h.handler.OnPeerCallEnd(peer.Name, msg.UUID, msg.Cause)
+		}
+		// Relay to all other peers
+		h.callMu.Lock()
+		delete(h.activeCalls, msg.UUID)
+		h.callMu.Unlock()
+
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.mu.RLock()
+			for _, p := range h.peers {
+				if p.Name != peer.Name && !IsInPath(&msg, p.Name) {
+					p.SendJSON(relay)
+				}
+			}
+			h.mu.RUnlock()
+		}
+
+	case MsgSDSRelay:
+		if h.handler != nil {
+			h.handler.OnPeerSDSRelay(peer.Name, msg.SourceISSI, msg.DestISSI, msg.SDSData)
+		}
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.relayToPeers(relay, peer.Name)
 		}
 	}
 }
@@ -354,18 +384,15 @@ func (h *Hub) handleBinaryMessage(peer *Peer, data []byte) {
 		h.handler.OnPeerVoiceFrame(peer.Name, callUUID, frameData)
 	}
 
-	// Forward to other peers in this call
-	h.callMu.RLock()
-	peerNames := h.activeCalls[callUUID]
-	h.callMu.RUnlock()
-
-	for name := range peerNames {
-		if name != peer.Name {
-			if p := h.getPeer(name); p != nil {
-				p.SendBinary(data)
-			}
+	// Mesh relay: forward to ALL other connected peers (not just call participants)
+	// This ensures voice reaches servers that are only indirectly connected
+	h.mu.RLock()
+	for _, p := range h.peers {
+		if p.Name != peer.Name {
+			p.SendBinary(data)
 		}
 	}
+	h.mu.RUnlock()
 }
 
 // ==================================================================
@@ -381,13 +408,13 @@ func (h *Hub) BroadcastSubscriber(issi uint32, action string, gssis []uint32) {
 		Action: action,
 		GSSIs:  gssis,
 	}
+	h.mesh.PrepareOutgoing(msg)
 	h.broadcastToAllPeers(msg)
 }
 
 // BroadcastAffiliate notifies all peers about an affiliation change.
 // Only federated GSSIs (23-90) are shared.
 func (h *Hub) BroadcastAffiliate(issi uint32, action string, gssis []uint32) {
-	// Filter to only federated GSSIs
 	fedGSSIs := make([]uint32, 0, len(gssis))
 	for _, g := range gssis {
 		if isFederatedGSSI(g) {
@@ -404,6 +431,7 @@ func (h *Hub) BroadcastAffiliate(issi uint32, action string, gssis []uint32) {
 		Action: action,
 		GSSIs:  fedGSSIs,
 	}
+	h.mesh.PrepareOutgoing(msg)
 	h.broadcastToAllPeers(msg)
 }
 
@@ -422,25 +450,28 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 		Priority:   priority,
 		Service:    service,
 	}
+	h.mesh.PrepareOutgoing(msg)
 
-	targets := h.findPeersForGSSI(destGSSI, "")
-	if len(targets) > 0 {
+	// Broadcast to ALL peers (mesh relay — they forward further)
+	h.callMu.Lock()
+	if h.activeCalls[callUUID] == nil {
+		h.activeCalls[callUUID] = make(map[string]bool)
+	}
+	h.callMu.Unlock()
+
+	h.mu.RLock()
+	for _, peer := range h.peers {
+		peer.SendJSON(msg)
 		h.callMu.Lock()
-		if h.activeCalls[callUUID] == nil {
-			h.activeCalls[callUUID] = make(map[string]bool)
-		}
-		for _, peer := range targets {
-			h.activeCalls[callUUID][peer.Name] = true
-			peer.SendJSON(msg)
-		}
+		h.activeCalls[callUUID][peer.Name] = true
 		h.callMu.Unlock()
 	}
+	h.mu.RUnlock()
 }
 
-// BroadcastCallEnd notifies peers about a call ending.
+// BroadcastCallEnd notifies all peers about a call ending.
 func (h *Hub) BroadcastCallEnd(callUUID string, cause uint8) {
 	h.callMu.Lock()
-	peerNames := h.activeCalls[callUUID]
 	delete(h.activeCalls, callUUID)
 	h.callMu.Unlock()
 
@@ -450,33 +481,21 @@ func (h *Hub) BroadcastCallEnd(callUUID string, cause uint8) {
 		UUID:   callUUID,
 		Cause:  cause,
 	}
-	for name := range peerNames {
-		if p := h.getPeer(name); p != nil {
-			p.SendJSON(msg)
-		}
-	}
+	h.mesh.PrepareOutgoing(msg)
+	h.broadcastToAllPeers(msg)
 }
 
-// BroadcastVoiceFrame sends a voice frame to peers involved in a call.
+// BroadcastVoiceFrame sends a voice frame to all connected peers (mesh relay).
 func (h *Hub) BroadcastVoiceFrame(callUUID string, frameData []byte) {
-	h.callMu.RLock()
-	peerNames := h.activeCalls[callUUID]
-	h.callMu.RUnlock()
-
-	if len(peerNames) == 0 {
-		return
-	}
-
-	// Binary format: callUUID (36 bytes ASCII) + frame payload
 	data := append([]byte(callUUID), frameData...)
-	for name := range peerNames {
-		if p := h.getPeer(name); p != nil {
-			p.SendBinary(data)
-		}
+	h.mu.RLock()
+	for _, peer := range h.peers {
+		peer.SendBinary(data)
 	}
+	h.mu.RUnlock()
 }
 
-// BroadcastSDS relays an SDS message to peers that have the target ISSI.
+// BroadcastSDS relays an SDS message through the mesh.
 func (h *Hub) BroadcastSDS(sourceISSI, destISSI uint32, sdsDataHex string) {
 	msg := &Message{
 		Type:       MsgSDSRelay,
@@ -485,19 +504,7 @@ func (h *Hub) BroadcastSDS(sourceISSI, destISSI uint32, sdsDataHex string) {
 		DestISSI:   destISSI,
 		SDSData:    sdsDataHex,
 	}
-
-	// Find peer that has the target ISSI
-	h.mu.RLock()
-	for _, peer := range h.peers {
-		if peer.HasISSI(destISSI) {
-			peer.SendJSON(msg)
-			h.mu.RUnlock()
-			return
-		}
-	}
-	h.mu.RUnlock()
-
-	// If no specific peer found, broadcast to all
+	h.mesh.PrepareOutgoing(msg)
 	h.broadcastToAllPeers(msg)
 }
 

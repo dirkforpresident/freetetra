@@ -20,13 +20,21 @@ const (
 )
 
 // ProtocolVersion is the federation protocol version.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
+
+// MaxTTL is the maximum number of hops a message can travel.
+const MaxTTL = 10
 
 // Message is the envelope for all federation JSON messages.
 type Message struct {
 	Type    string `json:"type"`
 	Origin  string `json:"origin"`  // Server name that originated this message
 	Version int    `json:"version,omitempty"`
+
+	// Mesh relay fields
+	MsgID string   `json:"msg_id,omitempty"` // Unique message ID for deduplication
+	TTL   int      `json:"ttl,omitempty"`    // Hops remaining (decremented at each relay)
+	Path  []string `json:"path,omitempty"`   // Servers this message has passed through
 
 	// Subscriber/Affiliate updates
 	ISSI   uint32   `json:"issi,omitempty"`
