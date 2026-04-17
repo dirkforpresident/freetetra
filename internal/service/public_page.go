@@ -15,28 +15,24 @@ func (s *Service) registerPublicHandlers() {
 func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 	clients := s.server.SnapshotClients()
 
-	// Count real subscribers (exclude bot ISSIs like 900001)
+	// Count subscribers and repeaters
 	subscriberCount := 0
+	repeaterCount := 0
+	botCount := 0
 	for _, c := range clients {
+		isBotClient := false
 		for _, sub := range c.Subscribers {
-			if sub.Number < 800000 { // Bot ISSIs are 800000+
+			if sub.Number >= 800000 {
+				isBotClient = true
+			} else {
 				subscriberCount++
 			}
 		}
-	}
-
-	// Count real clients (exclude webradio/echo modules)
-	clientCount := 0
-	for _, c := range clients {
-		hasRealSub := false
-		for _, sub := range c.Subscribers {
-			if sub.Number < 800000 {
-				hasRealSub = true
-				break
-			}
-		}
-		if hasRealSub || len(c.Subscribers) == 0 {
-			clientCount++
+		if isBotClient {
+			botCount++
+		} else {
+			// Client without bot ISSI = BlueStation repeater
+			repeaterCount++
 		}
 	}
 
@@ -49,7 +45,7 @@ func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 		"server":      "FreeTetra DO0RAM",
 		"version":     "1.0",
 		"uptime":      time.Since(startTime).String(),
-		"clients":     clientCount,
+		"repeaters":   repeaterCount,
 		"subscribers": subscriberCount,
 		"positions":   len(positions),
 	})
@@ -363,7 +359,7 @@ function update() {
     fetch("/api/public/status")
         .then(r => r.json())
         .then(d => {
-            document.getElementById("s-clients").textContent = d.clients || 0;
+            document.getElementById("s-clients").textContent = d.repeaters || 0;
             document.getElementById("s-subs").textContent = d.subscribers || 0;
             document.getElementById("s-positions").textContent = d.positions || 0;
         })
