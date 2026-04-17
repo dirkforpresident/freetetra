@@ -337,7 +337,6 @@ body {
     </div>
 
     <div class="card">
-        <h2>Mitmachen</h2>
         <div class="steps">
             <div class="step">
                 <div class="step-num">1</div>
