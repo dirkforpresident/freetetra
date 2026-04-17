@@ -324,34 +324,36 @@ body {
 
     <div class="card">
         <h2>Was ist FreeTetra?</h2>
-        <p>FreeTetra verbindet TETRA-Basisstationen (BlueStation) ueber das Internet zu einem freien,
-           dezentralen Funknetz. Wie E-Mail oder Matrix — jeder kann einen eigenen Server betreiben,
-           alle Server sind untereinander verbunden.</p>
-        <p>Kein zentraler Betreiber, kein Machthaber. Offenes Protokoll, offener Code (GPLv3).</p>
+        <p>FreeTetra ist ein offenes TETRA-Funknetz fuer Amateurfunk. Jeder kann mitmachen —
+           entweder ueber einen bestehenden Server oder mit einem eigenen.</p>
+        <p>Das Netz ist <strong>foederiert</strong>: Mehrere unabhaengige Server sind untereinander
+           verbunden, wie bei E-Mail. Egal bei welchem Server du bist — du erreichst alle.
+           Kein zentraler Betreiber, kein Machthaber.</p>
 
         <div class="federation-info">
-            Basiert auf <code>BlueStation</code> von MidnightBlueLabs und dem <code>Brew</code>-Protokoll.
-            Server foederieren automatisch — wie IRC, XMPP oder E-Mail.
+            Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation) und dem <code>Brew</code>-Protokoll.
+            Offener Code (GPLv3) — jeder kann pruefen, aendern, mitmachen.
         </div>
     </div>
 
     <div class="card">
         <h2>Wie mache ich mit?</h2>
+        <p style="margin-bottom:20px;color:var(--text-dim)">Du brauchst keinen eigenen Server. Such dir einen bestehenden aus und buche dein Funkgeraet dort ein. Wenn du willst, kannst du spaeter selbst einen betreiben.</p>
         <div class="steps">
             <div class="step">
                 <div class="step-num">1</div>
-                <h3>Funkgeraet einbuchen</h3>
-                <p>TETRA-Geraet auf eine BlueStation in deiner Naehe einbuchen. Fertig — du bist im Netz.</p>
+                <h3>Einbuchen</h3>
+                <p>TETRA-Funkgeraet auf eine BlueStation in deiner Naehe einbuchen. Fertig — du bist im Netz.</p>
             </div>
             <div class="step">
                 <div class="step-num">2</div>
-                <h3>Eigene BlueStation</h3>
-                <p>Raspberry Pi + SDR + Antenne. Erweitert die Abdeckung fuer alle in deiner Region.</p>
+                <h3>Abdeckung erweitern</h3>
+                <p>Eigene BlueStation aufstellen (Raspberry Pi + SDR + Antenne) und an einen bestehenden Server anbinden.</p>
             </div>
             <div class="step">
                 <div class="step-num">3</div>
-                <h3>Eigener Server</h3>
-                <p>FreeTetra-Server aufsetzen und mit anderen peeren. Werde Teil der Federation.</p>
+                <h3>Server betreiben</h3>
+                <p>Optional: Eigenen FreeTetra-Server aufsetzen und mit dem Netz verbinden. Fuer Leute die ihre eigene Infrastruktur wollen.</p>
             </div>
         </div>
     </div>
