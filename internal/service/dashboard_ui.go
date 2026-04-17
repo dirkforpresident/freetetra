@@ -83,13 +83,19 @@ type uiVirtualSDSEndpointRequest struct {
 }
 
 func (s *Service) registerDashboardHandlers() {
-	s.server.RegisterHTTPHandler("/ui", s.handleDashboardUI)
-	s.server.RegisterHTTPHandler("/ui/", s.handleDashboardUI)
+	// New FreeTetra admin dashboard (replaces cheetah's Vuetify UI)
+	s.server.RegisterHTTPHandler("/ui", s.handleAdminDashboard)
+	s.server.RegisterHTTPHandler("/ui/", s.handleAdminDashboard)
+	// Keep old Vuetify dashboard at /ui/legacy for reference
+	s.server.RegisterHTTPHandler("/ui/legacy", s.handleDashboardUI)
+	// API endpoints
 	s.server.RegisterHTTPHandler("/api/dashboard/snapshot", s.handleDashboardSnapshot)
 	s.server.RegisterHTTPHandler("/api/sds/send", s.handleSDSSend)
 	s.server.RegisterHTTPHandler("/api/sds/virtual/endpoints", s.handleVirtualSDSEndpoints)
 	s.server.RegisterHTTPHandler("/api/sds/virtual/endpoints/", s.handleVirtualSDSEndpointPath)
 	s.server.RegisterHTTPHandler("/api/sds/virtual/send", s.handleVirtualSDSSend)
+	// Peer info for admin dashboard
+	s.server.RegisterHTTPHandler("/api/peers", s.handlePeersAPI)
 }
 
 func (s *Service) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
