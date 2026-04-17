@@ -310,7 +310,7 @@ body {
     <div class="stats">
         <div class="stat">
             <div class="stat-value"><span class="stat-dot"></span><span id="s-clients">-</span></div>
-            <div class="stat-label">BlueStations</div>
+            <div class="stat-label">Repeater</div>
         </div>
         <div class="stat">
             <div class="stat-value" id="s-subs">-</div>
