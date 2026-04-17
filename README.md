@@ -1,342 +1,192 @@
 # FreeTetra
 
-Freies, foederiertes TETRA-Netz fuer Amateurfunk.
+Federated TETRA backhaul server for amateur radio.
 
-## Was ist das?
+Built for operators who already run a BlueStation repeater or hotspot and want
+to connect it to a decentralized network — no central authority, no single
+point of failure.
 
-FreeTetra ist ein offenes TETRA-Funknetz. Mehrere unabhaengige Server sind
-untereinander verbunden (foederiert) — wie bei E-Mail. Egal bei welchem Server
-du bist, du erreichst alle anderen. Kein zentraler Betreiber, kein Machthaber.
+## What it is
 
-**Du brauchst keinen eigenen Server um mitzumachen.** Verbinde deine BlueStation
-einfach mit einem bestehenden FreeTetra-Server. Wenn du willst, kannst du
-spaeter auch einen eigenen betreiben — aber du musst nicht.
+A drop-in Brew server that connects to multiple peers and exchanges
+subscribers, calls, and SDS via mesh relay. Any server can be a seed.
+Any server can go down without taking the network with it.
 
-```
-Server DO0RAM  <--peer-->  Server DO0XYZ  <--peer-->  Server DL0ABC
-   ^  ^  ^                    ^  ^                        ^
-  BS  BS  BS               BS  BS                       BS
-```
+Built on cheetah's `tetra-brew-mockup` with federation, mesh routing,
+RadioID auto-auth, APRS-IS forwarding, and BlueStation telemetry added.
 
-## Wie mitmachen?
+## Requirements
 
-### Stufe 1: Funkgeraet einbuchen
-Einfach bei einem FreeTetra-Repeater in deiner Naehe einbuchen.
-Fertig — du bist im Netz und erreichst alle.
+- Working BlueStation repeater or hotspot with recent firmware (telemetry
+  endpoint support)
+- Linux server with a public IP (VPS, home server with port forwarding,
+  or HamNet node)
+- Go 1.24+ for building from source, or pre-built binary from releases
 
-### Stufe 2: Eigenen Repeater aufstellen
-Du willst die Abdeckung in deiner Region erweitern? Eine
-[BlueStation](https://github.com/MidnightBlueLabs/tetra-bluestation) ist
-der Einstieg — Raspberry Pi + SDR + Antenne. Damit hast du einen Zimmer-Hotspot
-den du an einen bestehenden FreeTetra-Server anbindest.
-
-Fuer einen richtigen Repeater mit Reichweite und Dauerbetrieb braucht es mehr:
-Bandpassfilter, Endstufe (PA), Duplexer, wetterfestes Gehaeuse, Aussenmontage.
-Das ist kein Muss, aber wer die Erfahrung hat kann damit eine vollwertige
-TETRA-Zelle mit mehreren Kilometern Reichweite aufbauen.
-
-### Stufe 3: Eigenen Server betreiben (optional)
-Du willst deine eigene Infrastruktur kontrollieren? Setze einen eigenen
-FreeTetra-Server auf und verbinde ihn mit dem Netz. Deine BlueStations
-verbinden sich dann zu deinem Server, und dein Server peert automatisch
-mit den anderen. Dafuer brauchst du einen Linux-Server (VPS, Raspberry Pi,
-oder ein Rechner zuhause).
-
-## Schnellstart (Server)
+## Quick start
 
 ```bash
-# Binary herunterladen (oder selbst bauen, siehe unten)
-wget https://github.com/freetetra/server/releases/latest/download/freetetra-linux-amd64
-chmod +x freetetra-linux-amd64
-
-# Config erstellen
-cp .env.example .env
-nano .env
-
-# Starten
-./freetetra-linux-amd64
-```
-
-### Selbst bauen
-
-```bash
-git clone https://github.com/freetetra/server.git
-cd server
+git clone https://github.com/dirkforpresident/freetetra.git
+cd freetetra
 go build -o freetetra ./cmd/tetra-brew
+cp .env.example .env
+# edit .env
+./freetetra
 ```
 
-### Docker
+Or via Docker:
 
 ```bash
-docker compose up --build brew-router
+docker compose up -d
 ```
 
-## BlueStation verbinden
+## BlueStation configuration
+
+Point your BS at the server. Any valid DMR/TETRA ID registered on
+radioid.net is accepted automatically.
 
 ```toml
 [brew]
-host = "freetetra.1xx.is"
+host = "your-freetetra-server.tld"
 port = 443
 tls = true
-username = DEINE_DIGITALFUNK_ID
+username = YOUR_ISSI
+password = "blafablafa"
+
+[telemetry]
+host = "your-freetetra-server.tld"
+port = 443
+use_tls = true
+username = "YOUR_ISSI"
 password = "blafablafa"
 ```
 
-Keine Registrierung noetig — die Digitalfunk-ID (ISSI) wird automatisch
-ueber die [RadioID](https://radioid.net) API verifiziert.
+## GSSI scheme
 
-## GSSI-Schema
-
-Einheitliches Talkgroup-Schema fuer alle FreeTetra-Server:
+Enforced in code. Same across all FreeTetra servers.
 
 ```
-GSSI  1 -  4    Lokal — nur auf dieser Zelle, wird nicht weitergeleitet
-GSSI  5 - 90    FreeTetra — wird zwischen allen Servern geteilt
-GSSI 91+        Reserviert — spaeter fuer Bridges (z.B. DMR)
+1 - 4     local (not forwarded)
+5 - 90    federation (shared across all peered servers)
+91+       reserved (future DMR bridge)
 ```
 
-| GSSI | Typ | Beschreibung |
-|---|---|---|
-| 1-4 | Lokal | Sprache nur auf dieser Zelle |
-| 5-22 | FreeTetra | Frei fuer Services (Radio, Echo, Ansagen, ...) |
-| 23 | FreeTetra | SomaFM DEF CON Radio |
-| 24 | FreeTetra | Deutschlandfunk (DLF) |
-| 25 | FreeTetra | Echo / Papagei |
-| 26-90 | FreeTetra | Frei fuer gemeinsame Nutzung |
-| 91+ | Reserviert | Geplant: DMR-Bridge |
+## Federation
 
-Alle GSSIs von 5-90 werden automatisch zwischen allen verbundenen Servern
-geteilt. Ein Gespraech auf TG 30 ist auf jedem FreeTetra-Server hoerbar.
-
----
-
-## Server finden sich selbst
-
-Ein neuer Server braucht nur **einen** Seed-Peer in seiner Config.
-Darueber lernt er alle anderen Server automatisch kennen (Gossip).
-
-```env
-FEDERATION_PEERS=wss://freetetra.1xx.is/peer/
-```
-
-Jeder Server kann Seed sein — alle sind gleichberechtigt.
-
----
-
-## Features
-
-### Basis (von tetra-brew-mockup / cheetah)
-
-| Feature | Beschreibung |
-|---|---|
-| **Brew-Protokoll** | Volles Binary-Protokoll (class/type Header, little-endian) ueber WebSocket |
-| **HTTP Digest Auth** | Sichere Authentifizierung fuer BlueStation-Verbindungen (RFC 2831) |
-| **Group Call Routing** | Sprache wird an alle Clients geroutet die auf der Talkgroup (GSSI) hoeren |
-| **Subscriber Management** | Register/Deregister/Affiliate/Deaffiliate von ISSIs und GSSIs |
-| **SDS Routing** | Short Data Service (Textnachrichten) werden zwischen Subscribers geroutet |
-| **Echo/Papagei** | Testservice der empfangene Sprache zurueckspielt (konfigurierbarer GSSI) |
-| **Webradio Bridge** | Internet-Audiostreams in Talkgroups einspeisen (ffmpeg + ACELP Encoder) |
-| **Zello Bridge** | Bidirektionale Bruecke zwischen Brew-Talkgroups und Zello-Kanaelen |
-| **Netstack Bridge** | Anbindung an echte TETRA-Infrastruktur via MQTT |
-| **Dashboard UI** | Vuetify Web-Dashboard mit Live-Polling (Clients, Calls, SDS) |
-| **SDS API** | HTTP API zum Senden/Empfangen von SDS-Nachrichten |
-| **Virtual SDS** | Virtuelle SDS-Endpunkte per API |
-| **Callout Manager** | Managed Group-Call Steuerung |
-| **Module Clients** | Separate Binaries fuer Webradio, Zello, Echo (verbinden sich als Brew-Client) |
-
-### FreeTetra-Erweiterungen (von DO1XX)
-
-| Feature | Beschreibung |
-|---|---|
-| **Federation / Peering** | Server-zu-Server WebSocket-Verbindungen. Subscriber und Calls werden automatisch zwischen Servern geteilt. |
-| **Mesh-Relay** | Jeder Server ist Relay-Knoten. Nachrichten reisen ueber mehrere Hops (max 10) mit TTL, Path-Tracking und Deduplizierung. Kein zentraler Punkt. |
-| **Gossip Auto-Discovery** | Ein Seed-Peer reicht — neue Server lernen alle anderen automatisch kennen. |
-| **RadioID Auto-Auth** | Automatische Authentifizierung ueber radioid.net. Jede registrierte ISSI = lizenzierter Funkamateur darf verbinden. Kein manuelles Account-Anlegen. |
-| **RadioID Local DB** | Komplette User-DB wird auf dem Server gecacht (~260k Eintraege, users.txt). Automatischer Sync von radioid.net (konfigurierbares Intervall). |
-| **Offline Mode** | Server ohne Internet nutzen die lokale users.txt. Perfekt fuer HamNet-Installationen. |
-| **DB-Sync ueber Federation** | Server ohne Internet bekommen die User-DB automatisch von verbundenen Peers. Mesh-Netz = verteilte User-DB. |
-| **ISSI Blocklist** | Einzelne ISSIs sperren (defekte/stoerende Geraete). Localhost-only API. |
-| **Auth Rate Limiting** | 5 fehlgeschlagene Logins in 2 Min → IP fuer 15 Min gesperrt. |
-| **BlueStation Telemetry** | Nativer Endpoint fuer `bluestation-telemetry-v1` Protokoll. Server kennt alle eingebuchten Geraete auf jeder Zelle. |
-| **Repeater Heartbeat** | Alternative HTTP-API fuer Custom-Clients ohne native Telemetry-Support. |
-| **LIP Position Tracking** | Eingehende SDS werden auf TETRA LIP (GPS) geprueft. Positionen pro ISSI mit Timestamp. |
-| **APRS-IS Integration** | LIP-Positionen werden automatisch an aprs.fi gesendet. Callsign-Lookup ueber RadioID. |
-| **GSSI-Schema Enforcement** | TG 1-4 lokal, TG 5-90 federation, TG 91+ reserviert (DMR-Bridge geplant). Im Code erzwungen. |
-| **Oeffentliche Startseite** | `/` — Erklaerung + Live-Stats (Repeater, Subscribers, Positionen). |
-| **Admin Dashboard** | `/ui` — schlankes Dashboard: Status, Repeater, Subscriber, Peers, Positionen, Activity. Nur Anzeige, kein Login noetig. |
-| **Public Status API** | `/api/public/status` — Live-Zahlen ohne Auth. |
-
----
-
-## Konfiguration
-
-Alle Einstellungen ueber Umgebungsvariablen (`.env` Datei):
-
-### Server
-
-```env
-BREW_MODE=server
-HTTP_LISTEN_ADDR=127.0.0.1:8091
-BREW_SERVER_USERNAME=standard-user      # statischer Fallback-User
-BREW_SERVER_PASSWORD=passwort
-BREW_SERVER_REALM=brew
-```
-
-### RadioID Auto-Auth
-
-```env
-RADIOID_AUTH_ENABLED=true
-RADIOID_SHARED_KEY=blafablafa           # gemeinsames Passwort fuer alle RadioID-User
-RADIOID_SYNC_ON_START=true              # User-DB beim Start runterladen
-RADIOID_SYNC_EVERY=24h                  # DB alle 24h neu synchronisieren
-RADIOID_USERS_FILE=users.txt            # Pfad zur lokalen User-DB
-RADIOID_OFFLINE_MODE=false              # true = nur lokale DB nutzen (HamNet)
-```
-
-Wenn aktiviert, darf sich jede ISSI verbinden die bei radioid.net als
-lizenzierter Funkamateur registriert ist. Das Shared Key ist das Passwort
-das alle User in ihrer BlueStation-Config eintragen.
-
-### Federation
+Peer with one seed, get the rest via gossip. Servers advertise their known
+peers; new servers auto-connect to everyone.
 
 ```env
 FEDERATION_ENABLED=true
-FEDERATION_NAME=DO0RAM                  # Name dieses Servers
-FEDERATION_KEY=blafablafa            # Schluessel fuer Peer-Auth
-FEDERATION_PEERS=wss://brew.example.com/peer/,wss://other.de/peer/
+FEDERATION_NAME=YOUR_CALLSIGN
+FEDERATION_KEY=blafablafa
+FEDERATION_SELF_URL=wss://your-server.tld/peer/
+FEDERATION_PEERS=wss://freetetra.1xx.is/peer/
 ```
 
-### APRS-IS
+Mesh relay with TTL (max 10 hops), message deduplication, path tracking.
+Loops are prevented. Voice frames flood-forward to all connected peers.
+Kill any server and the rest keeps working.
+
+## RadioID auto-auth
+
+Connection is accepted if the username (ISSI) is a licensed amateur
+on radioid.net. No account creation, no manual allow-list.
+
+```env
+RADIOID_AUTH_ENABLED=true
+RADIOID_SHARED_KEY=blafablafa
+RADIOID_SYNC_ON_START=true
+RADIOID_SYNC_EVERY=24h
+```
+
+The full users database (~260k entries) is cached locally as `users.txt`
+and refreshed periodically. For HamNet or other offline deployments:
+
+```env
+RADIOID_OFFLINE_MODE=true
+```
+
+Peers without internet automatically download the DB from connected peers
+that have it. One internet-connected seed is enough for a whole HamNet
+cluster.
+
+Manual bans:
+
+```
+GET /api/radioid/block?issi=XXX&action=block    # localhost only
+```
+
+## APRS-IS
+
+LIP position reports (SDS Type4) are decoded and forwarded to APRS-IS.
+Callsign is looked up via RadioID (ISSI → callsign).
 
 ```env
 APRS_ENABLED=true
-APRS_CALLSIGN=DO0RAM
-APRS_PASSCODE=18098                     # wird aus Callsign berechnet
+APRS_CALLSIGN=YOUR_CALLSIGN
+APRS_PASSCODE=CALCULATED_PASSCODE
 APRS_SERVER=euro.aprs2.net:14580
 ```
 
-### Echo / Papagei
+## Endpoints
 
-```env
-ECHO_TALKGROUP=10002
-ECHO_BREW_ISSI=899002
+Public (no auth):
+
+```
+GET  /                           landing page
+GET  /ui                         admin dashboard (read-only)
+GET  /api/public/status          live counts
+GET  /api/positions              last position per ISSI
+GET  /api/telemetry/clients      connected BlueStations
+GET  /api/peers                  connected federation peers
+GET  /api/users.txt              local RadioID database (for peer sync)
 ```
 
-### Webradio
+Authenticated (by protocol):
 
-Laeuft als separater Prozess (`tetra-brew-webradio`):
-
-```env
-BREW_MODE=webradio
-BREW_CLIENT_BASE_URL=http://127.0.0.1:8091
-WEBRADIO_ENABLED=true
-WEBRADIO_STREAM_URL=https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3
-WEBRADIO_TALKGROUP=887
-WEBRADIO_SOURCE_ISSI=900001
-WEBRADIO_ENCODER_BIN=/opt/freetetra/tetra-acelp-stdio
+```
+GET  /brew/                      BlueStation discovery (HTTP Digest + RadioID)
+WS   /                           telemetry (HTTP Basic + RadioID)
+WS   /peer/                      federation peer (shared key)
 ```
 
-Benoetigt einen TETRA ACELP Encoder. Bauanleitung:
+Localhost only (admin actions — use SSH):
+
+```
+GET  /api/radioid/block          ban/unban an ISSI
+```
+
+## Services (optional)
+
+Echo/parrot and webradio run as separate client processes, not part of the
+core server.
+
 ```bash
-git clone https://github.com/ElijahHamilton/tetra-acelp.git
-cd tetra-acelp
-# stdio-Wrapper bauen:
-gcc -Icodec/ -Ofast encoder_stdio.c codec/*.c -o tetra-acelp-stdio
+./tetra-brew-echo      # echo service
+./tetra-brew-webradio  # webradio (ACELP encoder required)
 ```
 
----
+## Build
 
-## API Endpunkte
+ACELP codec is included under `codec/`. No external downloads.
 
-### Oeffentlich (ohne Auth)
+```bash
+go build ./cmd/tetra-brew
+go build ./cmd/tetra-brew-webradio
+go build ./cmd/tetra-brew-echo
 
-| Endpunkt | Methode | Beschreibung |
-|---|---|---|
-| `/` | GET | Landing Page |
-| `/api/public/status` | GET | Live-Statistiken (Clients, Subscribers, Positionen) |
-| `/api/positions` | GET | Letzte Position pro ISSI |
-| `/api/positions/history` | GET | Letzte 100 Positionsupdates |
-| `/brew/` | GET | Brew Discovery Endpoint (Digest Auth) |
-| `/peer/` | WebSocket | Federation Peer-Verbindung (Key Auth) |
-
-### Admin (nur localhost)
-
-| Endpunkt | Methode | Beschreibung |
-|---|---|---|
-| `/ui` | GET | Admin-Dashboard (Vuetify) |
-| `/api/dashboard/snapshot` | GET | Dashboard-Daten |
-| `/api/radioid/lookup?issi=XXX` | GET | ISSI bei RadioID nachschlagen |
-| `/api/radioid/users` | GET | Alle bekannten User (Cache) |
-| `/api/radioid/block?issi=XXX&action=block` | GET | ISSI sperren |
-| `/api/radioid/block?issi=XXX&action=unblock` | GET | ISSI entsperren |
-| `/api/sds/send?to=ISSI&text=MSG` | GET | SDS senden |
-| `/api/sds/virtual/endpoints` | GET/POST | Virtuelle SDS-Endpunkte |
-
----
-
-## Sicherheit
-
-Vierschichtiger Schutz:
-
-```
-Verbindungsversuch
-  │
-  ├─ 1. RadioID: Ist die ISSI ein lizenzierter Funkamateur? → Nein → ABGELEHNT
-  │
-  ├─ 2. Shared Key: Stimmt das Passwort? → Nein → ABGELEHNT
-  │
-  ├─ 3. Rate Limit: 5x falsches PW in 2 Min? → Ja → 15 MIN GESPERRT
-  │
-  ├─ 4. Blocklist: ISSI manuell gesperrt? → Ja → ABGELEHNT
-  │
-  └─ ✅ VERBUNDEN
+# Build ACELP encoder for webradio
+gcc -Icodec/ -Ofast codec/encoder_stdio.c codec/codec/*.c -o tetra-acelp-stdio
 ```
 
-Admin-APIs sind zusaetzlich auf localhost beschraenkt.
+## License
 
----
-
-## Architektur
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │           FreeTetra Server (Go)         │
-                    │                                         │
-  BlueStation ──────┤  Brew Protocol Handler                  │
-  (WebSocket)       │    ├── Subscriber Management            │
-                    │    ├── Call Routing (Group/Individual)   │
-                    │    ├── SDS Routing                       │
-                    │    └── RadioID Auto-Auth                 │
-                    │                                         │
-  Andere Server ────┤  Federation Hub                         │
-  (WebSocket)       │    ├── Peer Management                  │
-                    │    ├── Subscriber Sync                   │
-                    │    ├── Call Forwarding                   │
-                    │    └── Loop Prevention                   │
-                    │                                         │
-                    │  Services                               │
-                    │    ├── LIP Position Tracking → APRS-IS  │
-                    │    ├── Echo/Papagei                      │
-                    │    ├── SDS Bridge + Virtual Endpoints    │
-                    │    └── Dashboard UI                      │
-                    │                                         │
-  Webradio ─────────┤  Module Clients (separate Prozesse)     │
-  Zello Bridge      │    ├── tetra-brew-webradio              │
-  Echo              │    ├── tetra-brew-zello                 │
-                    │    └── tetra-brew-echo                  │
-                    └─────────────────────────────────────────┘
-```
-
----
-
-## Lizenz
-
-GPLv3 — Frei wie in Freiheit. Jeder darf den Code nutzen, aendern und verbreiten,
-solange Aenderungen ebenfalls unter GPLv3 veroeffentlicht werden.
+GPLv3.
 
 ## Credits
 
-- Brew-Server Basis: [tetra-brew-mockup](https://github.com/) von cheetah
-- ACELP Codec: [tetra-acelp](https://github.com/ElijahHamilton/tetra-acelp) von ElijahHamilton, basierend auf [outerplane/tetra-codec](https://github.com/outerplane/tetra-codec)
-- [BlueStation](https://github.com/MidnightBlueLabs/tetra-bluestation) von MidnightBlueLabs
-- Federation, RadioID-Auth, APRS-IS, Positions-Tracking: DO1XX
+- `tetra-brew-mockup` by cheetah — Brew protocol implementation
+- `tetra-acelp` by ElijahHamilton (based on outerplane/tetra-codec) — ACELP codec
+- `tetra-bluestation` by MidnightBlueLabs — TETRA base station (FOSS)
+- Federation, mesh, RadioID, APRS, telemetry, docs: DO1XX
