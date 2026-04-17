@@ -143,7 +143,13 @@ func (e *EchoBridge) OnBrewCallControl(m *brew.CallControlMessage) {
 			p.Service,
 		)
 	case brew.CallStateGroupIdle, brew.CallStateCallRelease:
-		e.finalizeCapture(m.Identifier, m.CallState)
+		// Wait briefly for late-arriving voice frames before finalizing
+		callID := m.Identifier
+		callState := m.CallState
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			e.finalizeCapture(callID, callState)
+		}()
 	}
 }
 
