@@ -71,8 +71,20 @@ func (r *RadioIDAuth) Verify(issi uint32) (string, bool) {
 	}
 	r.mu.RUnlock()
 
-	// Query RadioID API
+	// Query RadioID API. TETRA ISSIs can have extension digits (e.g. 262356300
+	// = DMR ID 2623563 + extension 00). Try full ISSI first, then strip digits
+	// from the end until we find a match.
 	entry := r.queryRadioID(issi)
+	if !entry.Valid {
+		for truncated := issi / 10; truncated >= 1000000; truncated /= 10 {
+			e := r.queryRadioID(truncated)
+			if e.Valid {
+				e.ISSI = issi // Keep original ISSI for cache
+				entry = e
+				break
+			}
+		}
+	}
 
 	r.mu.Lock()
 	r.cache[issi] = entry

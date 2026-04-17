@@ -50,6 +50,8 @@ type Service struct {
 	aprsBridge    *APRSBridge
 	radioIDAuth   *RadioIDAuth
 	rateLimiter   *AuthRateLimiter
+	repeaters     *RepeaterHeartbeat
+	telemetry     *TelemetryServer
 }
 
 type activeCall struct {
@@ -129,10 +131,13 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 		logger.Printf("RadioID: auto-auth enabled (shared key configured)")
 	}
 
+	s.repeaters = newRepeaterHeartbeat()
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.registerPublicHandlers()
 	s.registerRadioIDHandlers()
+	s.registerRepeaterHandlers()
+	s.registerTelemetryServer()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {

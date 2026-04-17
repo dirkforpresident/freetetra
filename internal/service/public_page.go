@@ -15,26 +15,18 @@ func (s *Service) registerPublicHandlers() {
 func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 	clients := s.server.SnapshotClients()
 
-	// Count subscribers and repeaters
-	subscriberCount := 0
+	// Repeater count + subscriber count come from BlueStation telemetry (most accurate).
+	// Falls back to heartbeat API for custom clients.
 	repeaterCount := 0
-	botCount := 0
-	for _, c := range clients {
-		isBotClient := false
-		for _, sub := range c.Subscribers {
-			if sub.Number >= 800000 {
-				isBotClient = true
-			} else {
-				subscriberCount++
-			}
-		}
-		if isBotClient {
-			botCount++
-		} else {
-			// Client without bot ISSI = BlueStation repeater
-			repeaterCount++
-		}
+	subscriberCount := 0
+	if s.telemetry != nil && s.telemetry.ActiveCount() > 0 {
+		repeaterCount = s.telemetry.ActiveCount()
+		subscriberCount = s.telemetry.TotalSubscribers()
+	} else if s.repeaters != nil {
+		repeaterCount = s.repeaters.ActiveCount()
+		subscriberCount = s.repeaters.TotalSubscribers()
 	}
+	_ = clients
 
 	positions := s.positionStore.Latest()
 
@@ -56,6 +48,11 @@ var startTime = time.Now()
 func (s *Service) handleLandingPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
+		return
+	}
+	// If this is a WebSocket upgrade request, treat as telemetry connection
+	if r.Header.Get("Upgrade") == "websocket" && s.telemetry != nil {
+		s.telemetry.handleConnection(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
