@@ -425,7 +425,7 @@ function sendSDS() {
             source_issi: parseInt(from),
             destination: parseInt(to),
             destination_type: "subscriber",
-            sds_type: "text",
+            sds_type: "flash",
             text: text
         })
     }).then(async r => {
