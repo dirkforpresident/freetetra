@@ -337,8 +337,7 @@ body {
     </div>
 
     <div class="card">
-        <h2>Wie mache ich mit?</h2>
-        <p style="margin-bottom:20px;color:var(--text-dim)">Du brauchst keinen eigenen Server. Such dir einen bestehenden aus und buche dein Funkgeraet dort ein. Wenn du willst, kannst du spaeter selbst einen betreiben.</p>
+        <h2>Mitmachen</h2>
         <div class="steps">
             <div class="step">
                 <div class="step-num">1</div>
