@@ -267,7 +267,11 @@ func (s *Service) handleSDSSend(w http.ResponseWriter, r *http.Request) {
 	sendFn := s.server.BroadcastToGroup
 	if req.DestinationType == "subscriber" {
 		sendFn = func(dest uint32, payload []byte, exclude string) int {
-			return s.server.BroadcastToSubscriber(dest, payload, exclude)
+			n := s.server.BroadcastToSubscriber(dest, payload, exclude)
+			if n == 0 {
+				n = s.server.BroadcastAll(payload, exclude)
+			}
+			return n
 		}
 	}
 
@@ -510,7 +514,11 @@ func (s *Service) handleVirtualSDSSend(w http.ResponseWriter, r *http.Request) {
 	sendFn := s.server.BroadcastToGroup
 	if req.DestinationType == "subscriber" {
 		sendFn = func(dest uint32, payload []byte, exclude string) int {
-			return s.server.BroadcastToSubscriber(dest, payload, exclude)
+			n := s.server.BroadcastToSubscriber(dest, payload, exclude)
+			if n == 0 {
+				n = s.server.BroadcastAll(payload, exclude)
+			}
+			return n
 		}
 	}
 
