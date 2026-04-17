@@ -63,18 +63,29 @@ type Hub struct {
 	callMu      sync.RWMutex
 	activeCalls map[string]map[string]bool // callUUID -> set of peer names
 
+	// Gossip: known peer URLs (discovered via peer exchange)
+	knownMu    sync.RWMutex
+	knownPeers map[string]string // name -> URL (all peers we've ever heard of)
+
+	// Our own public URL for advertising to peers
+	selfURL string
+
 	upgrader websocket.Upgrader
+
+	ctx context.Context
 }
 
 // NewHub creates a new federation hub.
-func NewHub(serverName, peerKey string, handler CallHandler, logger *log.Logger) *Hub {
+func NewHub(serverName, peerKey, selfURL string, handler CallHandler, logger *log.Logger) *Hub {
 	return &Hub{
 		serverName:  serverName,
 		peerKey:     peerKey,
+		selfURL:     selfURL,
 		handler:     handler,
 		logger:      logger,
 		peers:       make(map[string]*Peer),
 		activeCalls: make(map[string]map[string]bool),
+		knownPeers:  make(map[string]string),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -85,7 +96,13 @@ func NewHub(serverName, peerKey string, handler CallHandler, logger *log.Logger)
 
 // Start connects to all configured peers and begins the federation loop.
 func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
+	h.ctx = ctx
+
+	// Add configured peers to known list
 	for _, pc := range peerConfigs {
+		h.knownMu.Lock()
+		h.knownPeers[pc.Name] = pc.URL
+		h.knownMu.Unlock()
 		go h.maintainOutgoingPeer(ctx, pc)
 	}
 }
@@ -223,6 +240,8 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 	switch msg.Type {
 	case MsgHello:
 		h.logger.Printf("federation: hello from %s (version %d)", msg.Origin, msg.Version)
+		// Send our known peers list
+		h.sendPeerExchange(peer)
 
 	case MsgSyncRequest:
 		h.sendFullSync(peer)
@@ -303,6 +322,20 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		}
 		// If not deliverable locally, relay to other peers
 		h.relayToPeers(&msg, peer.Name)
+
+	case MsgPeerExchange:
+		newPeers := 0
+		for _, gp := range msg.Peers {
+			if gp.Name == h.serverName || gp.URL == "" {
+				continue
+			}
+			if h.tryAddDiscoveredPeer(gp.Name, gp.URL) {
+				newPeers++
+			}
+		}
+		if newPeers > 0 {
+			h.logger.Printf("federation: discovered %d new peer(s) via %s", newPeers, peer.Name)
+		}
 	}
 }
 
@@ -526,6 +559,66 @@ type PeerSnapshot struct {
 // ==================================================================
 // Internal helpers
 // ==================================================================
+
+// sendPeerExchange sends our list of known peers to a peer.
+func (h *Hub) sendPeerExchange(peer *Peer) {
+	h.knownMu.RLock()
+	peers := make([]GossipPeer, 0, len(h.knownPeers)+1)
+	// Include ourselves so the other side knows our URL
+	if h.selfURL != "" {
+		peers = append(peers, GossipPeer{Name: h.serverName, URL: h.selfURL})
+	}
+	for name, url := range h.knownPeers {
+		if name != peer.Name { // Don't tell a peer about itself
+			peers = append(peers, GossipPeer{Name: name, URL: url})
+		}
+	}
+	h.knownMu.RUnlock()
+
+	if len(peers) > 0 {
+		peer.SendJSON(&Message{
+			Type:   MsgPeerExchange,
+			Origin: h.serverName,
+			Peers:  peers,
+		})
+		h.logger.Printf("federation: sent %d known peer(s) to %s", len(peers), peer.Name)
+	}
+}
+
+// tryAddDiscoveredPeer adds a newly discovered peer and connects to it.
+// Returns true if the peer was new.
+func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
+	h.knownMu.Lock()
+	if _, exists := h.knownPeers[name]; exists {
+		h.knownMu.Unlock()
+		return false
+	}
+	h.knownPeers[name] = url
+	h.knownMu.Unlock()
+
+	// Check if already connected
+	h.mu.RLock()
+	alreadyConnected := false
+	for _, p := range h.peers {
+		if p.Name == name {
+			alreadyConnected = true
+			break
+		}
+	}
+	h.mu.RUnlock()
+
+	if alreadyConnected {
+		return false
+	}
+
+	h.logger.Printf("federation: auto-connecting to discovered peer %s at %s", name, url)
+	go h.maintainOutgoingPeer(h.ctx, PeerConfig{
+		Name: name,
+		URL:  url,
+		Key:  h.peerKey,
+	})
+	return true
+}
 
 func (h *Hub) registerPeer(peer *Peer) {
 	h.mu.Lock()

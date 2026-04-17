@@ -16,6 +16,7 @@ const (
 	MsgSDSRelay         = "sds_relay"         // SDS message relay
 	MsgSyncRequest      = "sync_request"      // Request full subscriber table
 	MsgSyncResponse     = "sync_response"     // Full subscriber table
+	MsgPeerExchange     = "peer_exchange"     // Exchange known peer URLs (gossip)
 )
 
 // ProtocolVersion is the federation protocol version.
@@ -46,6 +47,15 @@ type Message struct {
 
 	// Sync
 	Subscribers map[string]SyncSubscriber `json:"subscribers,omitempty"`
+
+	// Peer exchange (gossip)
+	Peers []GossipPeer `json:"peers,omitempty"`
+}
+
+// GossipPeer is a known peer advertised during peer exchange.
+type GossipPeer struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 // SyncSubscriber is a subscriber entry in a sync response.

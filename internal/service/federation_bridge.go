@@ -27,7 +27,7 @@ func newFederationBridge(cfg config.Config, logger *log.Logger, svc *Service) *f
 		logger: logger,
 		svc:    svc,
 	}
-	fb.hub = federation.NewHub(cfg.Federation.Name, cfg.Federation.Key, fb, logger)
+	fb.hub = federation.NewHub(cfg.Federation.Name, cfg.Federation.Key, cfg.Federation.SelfURL, fb, logger)
 	return fb
 }
 

@@ -75,6 +75,7 @@ type FederationConfig struct {
 	Name    string   // This server's name (shown to peers)
 	Key     string   // Shared key for peer authentication
 	Peers   []string // Peer URLs (wss://...)
+	SelfURL string   // Our own URL for advertising to peers (gossip)
 }
 
 type ServerConfig struct {
@@ -321,6 +322,7 @@ func LoadFromEnv() (Config, error) {
 			Name:    env("FEDERATION_NAME", ""),
 			Key:     env("FEDERATION_KEY", ""),
 			Peers:   envCSV("FEDERATION_PEERS"),
+			SelfURL: env("FEDERATION_SELF_URL", ""),
 		},
 		Echo: EchoConfig{
 			Talkgroup:     uint32(envInt("ECHO_TALKGROUP", 10002)),
