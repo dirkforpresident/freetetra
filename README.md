@@ -148,15 +148,23 @@ Jeder Server kann Seed sein — alle sind gleichberechtigt.
 
 | Feature | Beschreibung |
 |---|---|
-| **Federation / Peering** | Server-zu-Server WebSocket-Verbindungen. Subscriber und Calls werden automatisch zwischen Servern geteilt. Loop-Prevention verhindert Endlosschleifen. |
-| **RadioID Auto-Auth** | Automatische Authentifizierung ueber die RadioID API. Jede bei radioid.net registrierte ISSI (= lizenzierter Funkamateur) darf sich verbinden. Kein manuelles Account-Anlegen. |
-| **ISSI Blocklist** | Einzelne ISSIs koennen gesperrt werden (defekte/stoerende Geraete). API: `/api/radioid/block?issi=XXXXX&action=block` (nur von localhost). |
-| **Auth Rate Limiting** | Nach 5 fehlgeschlagenen Login-Versuchen in 2 Minuten wird die IP fuer 15 Minuten gesperrt. Schutz gegen Brute-Force. |
-| **LIP Position Tracking** | Eingehende SDS werden automatisch auf TETRA LIP (Location Information Protocol) geprueft. Positionen werden pro ISSI mit Timestamp gespeichert. |
-| **APRS-IS Integration** | Decodierte LIP-Positionen werden automatisch an APRS-IS gesendet. Callsign-Lookup ueber RadioID (ISSI → Rufzeichen). Positionen erscheinen auf aprs.fi. |
-| **Oeffentliche Startseite** | Landing Page auf `/` mit Erklaerung, Live-Statistiken, Mitmach-Anleitung. Ohne Login fuer jeden zugaenglich. |
-| **Public Status API** | `GET /api/public/status` liefert Live-Zahlen (Clients, Subscribers, Positionen) ohne Auth. |
-| **Localhost-geschuetzte Admin-APIs** | Admin-Endpunkte (`/api/radioid/*`) sind nur von localhost erreichbar — auch wenn der Server auf 0.0.0.0 bindet. |
+| **Federation / Peering** | Server-zu-Server WebSocket-Verbindungen. Subscriber und Calls werden automatisch zwischen Servern geteilt. |
+| **Mesh-Relay** | Jeder Server ist Relay-Knoten. Nachrichten reisen ueber mehrere Hops (max 10) mit TTL, Path-Tracking und Deduplizierung. Kein zentraler Punkt. |
+| **Gossip Auto-Discovery** | Ein Seed-Peer reicht — neue Server lernen alle anderen automatisch kennen. |
+| **RadioID Auto-Auth** | Automatische Authentifizierung ueber radioid.net. Jede registrierte ISSI = lizenzierter Funkamateur darf verbinden. Kein manuelles Account-Anlegen. |
+| **RadioID Local DB** | Komplette User-DB wird auf dem Server gecacht (~260k Eintraege, users.txt). Automatischer Sync von radioid.net (konfigurierbares Intervall). |
+| **Offline Mode** | Server ohne Internet nutzen die lokale users.txt. Perfekt fuer HamNet-Installationen. |
+| **DB-Sync ueber Federation** | Server ohne Internet bekommen die User-DB automatisch von verbundenen Peers. Mesh-Netz = verteilte User-DB. |
+| **ISSI Blocklist** | Einzelne ISSIs sperren (defekte/stoerende Geraete). Localhost-only API. |
+| **Auth Rate Limiting** | 5 fehlgeschlagene Logins in 2 Min → IP fuer 15 Min gesperrt. |
+| **BlueStation Telemetry** | Nativer Endpoint fuer `bluestation-telemetry-v1` Protokoll. Server kennt alle eingebuchten Geraete auf jeder Zelle. |
+| **Repeater Heartbeat** | Alternative HTTP-API fuer Custom-Clients ohne native Telemetry-Support. |
+| **LIP Position Tracking** | Eingehende SDS werden auf TETRA LIP (GPS) geprueft. Positionen pro ISSI mit Timestamp. |
+| **APRS-IS Integration** | LIP-Positionen werden automatisch an aprs.fi gesendet. Callsign-Lookup ueber RadioID. |
+| **GSSI-Schema Enforcement** | TG 1-4 lokal, TG 5-90 federation, TG 91+ reserviert (DMR-Bridge geplant). Im Code erzwungen. |
+| **Oeffentliche Startseite** | `/` — Erklaerung + Live-Stats (Repeater, Subscribers, Positionen). |
+| **Admin Dashboard** | `/ui` — schlankes Dashboard: Status, Repeater, Subscriber, Peers, Positionen, Activity. Nur Anzeige, kein Login noetig. |
+| **Public Status API** | `/api/public/status` — Live-Zahlen ohne Auth. |
 
 ---
 
@@ -179,6 +187,10 @@ BREW_SERVER_REALM=brew
 ```env
 RADIOID_AUTH_ENABLED=true
 RADIOID_SHARED_KEY=blafablafa           # gemeinsames Passwort fuer alle RadioID-User
+RADIOID_SYNC_ON_START=true              # User-DB beim Start runterladen
+RADIOID_SYNC_EVERY=24h                  # DB alle 24h neu synchronisieren
+RADIOID_USERS_FILE=users.txt            # Pfad zur lokalen User-DB
+RADIOID_OFFLINE_MODE=false              # true = nur lokale DB nutzen (HamNet)
 ```
 
 Wenn aktiviert, darf sich jede ISSI verbinden die bei radioid.net als
