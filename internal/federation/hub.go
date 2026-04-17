@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,16 +23,16 @@ type PeerConfig struct {
 // CallHandler is the interface that the Brew service must implement
 // to receive federation events.
 type CallHandler interface {
-	// OnPeerCallStart is called when a peer starts a group call.
 	OnPeerCallStart(peerName string, callUUID string, sourceISSI, destGSSI uint32, priority uint8, service uint16)
-	// OnPeerCallEnd is called when a peer ends a group call.
 	OnPeerCallEnd(peerName string, callUUID string, cause uint8)
-	// OnPeerVoiceFrame is called when a peer sends a voice frame.
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
-	// OnPeerSDSRelay is called when a peer relays an SDS message.
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
-	// GetLocalSubscribers returns all locally registered ISSIs with their GSSI affiliations.
 	GetLocalSubscribers() map[uint32][]uint32
+
+	// Users DB sync (optional — return empty if not available)
+	GetUsersDBInfo() (timestamp string, count int)
+	// DownloadUsersDBFrom fetches the users DB from a peer's URL
+	DownloadUsersDBFrom(url string) error
 }
 
 // FreeTetra GSSI Schema:
@@ -253,6 +254,7 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 	case MsgHello:
 		h.logger.Printf("federation: hello from %s (version %d)", msg.Origin, msg.Version)
 		h.sendPeerExchange(peer)
+		h.sendUsersDBOffer(peer)
 
 	case MsgSyncRequest:
 		h.sendFullSync(peer)
@@ -265,6 +267,12 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 			peer.AffiliateISSI(issi, info.GSSIs)
 		}
 		h.logger.Printf("federation: synced %d subscribers from %s", len(msg.Subscribers), peer.Name)
+
+	case MsgUsersDBOffer:
+		h.handleUsersDBOffer(peer, &msg)
+
+	case MsgUsersDBRequest:
+		h.sendUsersDBOffer(peer)
 
 	case MsgPeerExchange:
 		newPeers := 0
@@ -565,6 +573,53 @@ type PeerSnapshot struct {
 // ==================================================================
 // Internal helpers
 // ==================================================================
+
+// sendUsersDBOffer tells the peer when our users.txt was last updated.
+// The peer can decide to download ours if it's newer than theirs.
+func (h *Hub) sendUsersDBOffer(peer *Peer) {
+	if h.handler == nil || h.selfURL == "" {
+		return
+	}
+	ts, count := h.handler.GetUsersDBInfo()
+	if ts == "" || count == 0 {
+		return
+	}
+	// Convert wss://host/peer/ → https://host/api/users.txt
+	baseURL := h.selfURL
+	baseURL = strings.Replace(baseURL, "wss://", "https://", 1)
+	baseURL = strings.Replace(baseURL, "ws://", "http://", 1)
+	baseURL = strings.TrimSuffix(baseURL, "/peer/")
+	baseURL = strings.TrimSuffix(baseURL, "/peer")
+	dbURL := baseURL + "/api/users.txt"
+
+	peer.SendJSON(&Message{
+		Type:             MsgUsersDBOffer,
+		Origin:           h.serverName,
+		UsersDBTimestamp: ts,
+		UsersDBURL:       dbURL,
+		UsersDBCount:     count,
+	})
+}
+
+// handleUsersDBOffer processes an offer from a peer.
+// Downloads if peer's DB is newer than ours.
+func (h *Hub) handleUsersDBOffer(peer *Peer, msg *Message) {
+	if h.handler == nil || msg.UsersDBURL == "" {
+		return
+	}
+	ourTS, _ := h.handler.GetUsersDBInfo()
+
+	// If we have no DB or theirs is newer, download
+	if ourTS == "" || msg.UsersDBTimestamp > ourTS {
+		h.logger.Printf("federation: downloading users DB from %s (%d users, ts=%s)",
+			peer.Name, msg.UsersDBCount, msg.UsersDBTimestamp)
+		if err := h.handler.DownloadUsersDBFrom(msg.UsersDBURL); err != nil {
+			h.logger.Printf("federation: users DB download failed: %v", err)
+		} else {
+			h.logger.Printf("federation: users DB updated from %s", peer.Name)
+		}
+	}
+}
 
 // sendPeerExchange sends our list of known peers to a peer.
 func (h *Hub) sendPeerExchange(peer *Peer) {

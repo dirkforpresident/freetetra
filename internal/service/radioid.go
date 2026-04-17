@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -51,6 +52,59 @@ type radioIDResponse struct {
 		Country          string `json:"country"`
 		HasValidCallsign string `json:"has_valid_callsign"`
 	} `json:"results"`
+}
+
+// LocalDBInfo returns the timestamp and count of entries in users.txt.
+// Timestamp is the file's modification time in RFC3339 format.
+func (r *RadioIDAuth) LocalDBInfo() (string, int) {
+	info, err := os.Stat(r.localFile)
+	if err != nil {
+		return "", 0
+	}
+	r.mu.RLock()
+	count := len(r.localDB)
+	r.mu.RUnlock()
+	return info.ModTime().UTC().Format(time.RFC3339), count
+}
+
+// LocalDBPath returns the path to users.txt (for HTTP serving).
+func (r *RadioIDAuth) LocalDBPath() string {
+	return r.localFile
+}
+
+// DownloadFromURL downloads users.txt from a peer's HTTP endpoint.
+func (r *RadioIDAuth) DownloadFromURL(url string) error {
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	}
+
+	tmpFile := r.localFile + ".tmp"
+	f, err := os.Create(tmpFile)
+	if err != nil {
+		return fmt.Errorf("create tmp: %w", err)
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		os.Remove(tmpFile)
+		return fmt.Errorf("write: %w", err)
+	}
+	f.Close()
+
+	if err := os.Rename(tmpFile, r.localFile); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+
+	r.mu.Lock()
+	r.localDB = make(map[uint32]string)
+	r.mu.Unlock()
+	r.loadLocalDB()
+	return nil
 }
 
 func newRadioIDAuth(logger *log.Logger, offline bool, localFile string) *RadioIDAuth {
@@ -312,6 +366,28 @@ func (s *Service) registerRadioIDHandlers() {
 	s.server.RegisterHTTPHandler("/api/radioid/users", s.handleRadioIDUsers)
 	s.server.RegisterHTTPHandler("/api/radioid/block", s.handleRadioIDBlock)
 	s.server.RegisterHTTPHandler("/api/radioid/lookup", s.handleRadioIDLookup)
+	s.server.RegisterHTTPHandler("/api/users.txt", s.handleUsersDBFile)
+}
+
+// handleUsersDBFile serves the local users.txt file for peers to download.
+func (s *Service) handleUsersDBFile(w http.ResponseWriter, r *http.Request) {
+	if s.radioIDAuth == nil {
+		http.Error(w, "radioid not enabled", http.StatusNotFound)
+		return
+	}
+	path := s.radioIDAuth.LocalDBPath()
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "users.txt not available", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+	info, _ := os.Stat(path)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if info != nil {
+		w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
+	}
+	io.Copy(w, f)
 }
 
 // isLocalRequest checks if a request originates from localhost.

@@ -143,6 +143,20 @@ func (fb *federationBridge) OnPeerSDSRelay(peerName string, sourceISSI, destISSI
 	fb.logger.Printf("federation: delivered SDS from %s: %d->%d to %d local clients", peerName, sourceISSI, destISSI, n)
 }
 
+func (fb *federationBridge) GetUsersDBInfo() (string, int) {
+	if fb.svc.radioIDAuth == nil {
+		return "", 0
+	}
+	return fb.svc.radioIDAuth.LocalDBInfo()
+}
+
+func (fb *federationBridge) DownloadUsersDBFrom(url string) error {
+	if fb.svc.radioIDAuth == nil {
+		return fmt.Errorf("radioid auth not enabled")
+	}
+	return fb.svc.radioIDAuth.DownloadFromURL(url)
+}
+
 func (fb *federationBridge) GetLocalSubscribers() map[uint32][]uint32 {
 	clients := fb.svc.server.SnapshotClients()
 	result := make(map[uint32][]uint32)

@@ -17,6 +17,8 @@ const (
 	MsgSyncRequest      = "sync_request"      // Request full subscriber table
 	MsgSyncResponse     = "sync_response"     // Full subscriber table
 	MsgPeerExchange     = "peer_exchange"     // Exchange known peer URLs (gossip)
+	MsgUsersDBOffer     = "usersdb_offer"     // Advertise users.txt timestamp
+	MsgUsersDBRequest   = "usersdb_request"   // Request users.txt from peer
 )
 
 // ProtocolVersion is the federation protocol version.
@@ -58,6 +60,11 @@ type Message struct {
 
 	// Peer exchange (gossip)
 	Peers []GossipPeer `json:"peers,omitempty"`
+
+	// Users DB sync
+	UsersDBTimestamp string `json:"usersdb_timestamp,omitempty"`
+	UsersDBURL       string `json:"usersdb_url,omitempty"`
+	UsersDBCount     int    `json:"usersdb_count,omitempty"`
 }
 
 // GossipPeer is a known peer advertised during peer exchange.
