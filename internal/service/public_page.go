@@ -340,11 +340,6 @@ password = "blafablafa"</pre>
         <p style="margin-top:12px;font-size:0.82rem">Keine Registrierung noetig! Deine <a href="https://radioid.net" style="color:var(--blue)">Digitalfunk-ID</a> wird automatisch verifiziert. Passwort: <code style="color:var(--accent);font-family:'JetBrains Mono',monospace">blafablafa</code></p>
     </div>
 
-    <div style="text-align:center;margin:32px 0">
-        <a href="/ui" class="btn btn-accent">Server Dashboard</a>
-        <a href="https://github.com/dirkforpresident/freetetra" class="btn btn-outline">GitHub</a>
-    </div>
-
     <div class="footer">
         <p>FreeTetra — GPLv3 | Betrieben von DO0RAM (DO1XX)</p>
         <p style="margin-top:4px">Powered by <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">BlueStation</a></p>
