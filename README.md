@@ -110,34 +110,16 @@ geteilt. Ein Gespraech auf TG 30 ist auf jedem FreeTetra-Server hoerbar.
 
 ---
 
-## Wie die Server sich finden (Gossip)
+## Server finden sich selbst
 
-FreeTetra ist dezentral — kein Server ist wichtiger als ein anderer.
-Ein neuer Server braucht nur **einen einzigen Seed-Peer**, um ins Netz zu kommen.
+Ein neuer Server braucht nur **einen** Seed-Peer in seiner Config.
+Darueber lernt er alle anderen Server automatisch kennen (Gossip).
 
 ```env
-# In deiner .env — nur EIN Peer als Einstieg reicht:
 FEDERATION_PEERS=wss://freetetra.1xx.is/peer/
 ```
 
-Was dann passiert:
-
-1. Dein neuer Server verbindet sich zum Seed-Peer
-2. Der Seed-Peer schickt seine bekannte Peer-Liste mit
-3. Dein Server verbindet sich automatisch zu allen anderen
-4. Du bist im Netz — ohne jede Adresse manuell eintragen zu muessen
-
-**Jeder Server kann Seed sein.** Ob du `freetetra.1xx.is` nimmst oder
-`brew.julian.de` oder `freetetra.muenchen.net` — egal. Alle landen
-im gleichen Netz.
-
-**Wenn ein Server ausfaellt:**
-- Die restlichen Server bleiben verbunden
-- Dein Server ist weiter mit allen anderen direkt verbunden
-- Beim naechsten Start kommt er ueber irgendeinen bekannten Peer rein
-- Kein einzelner Ausfall legt das Netz lahm
-
-Das ist wie IRC oder E-Mail: viele gleichberechtigte Server, keiner ist der Chef.
+Jeder Server kann Seed sein — alle sind gleichberechtigt.
 
 ---
 
