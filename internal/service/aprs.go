@@ -198,16 +198,39 @@ func (a *APRSBridge) lookupCallsign(issi uint32) string {
 	}
 	a.mu.Unlock()
 
-	// Query RadioID API
+	// Try full ISSI first, then strip extension digits (TETRA ISSIs may have
+	// trailing digits beyond the base RadioID; e.g. 262356300 -> 2623563).
+	call := a.queryRadioIDOnce(issi)
+	if call == "" {
+		for try := issi / 10; try >= 1000000; try /= 10 {
+			call = a.queryRadioIDOnce(try)
+			if call != "" {
+				break
+			}
+		}
+	}
+	if call == "" {
+		return ""
+	}
+
+	a.mu.Lock()
+	a.callCache[issi] = call
+	a.cacheTTL[issi] = time.Now().Add(aprsCacheTTL)
+	a.mu.Unlock()
+
+	a.logger.Printf("APRS-IS: resolved ISSI %d -> %s", issi, call)
+	return call
+}
+
+// queryRadioIDOnce does a single RadioID API call, returns callsign or empty.
+func (a *APRSBridge) queryRadioIDOnce(issi uint32) string {
 	url := fmt.Sprintf("https://radioid.net/api/dmr/user/?id=%d", issi)
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		a.logger.Printf("APRS-IS: RadioID lookup failed for ISSI %d: %v", issi, err)
 		return ""
 	}
 	defer resp.Body.Close()
-
 	var result struct {
 		Results []struct {
 			Callsign string `json:"callsign"`
@@ -219,16 +242,7 @@ func (a *APRSBridge) lookupCallsign(issi uint32) string {
 	if len(result.Results) == 0 || result.Results[0].Callsign == "" {
 		return ""
 	}
-
-	call := strings.ToUpper(result.Results[0].Callsign)
-
-	a.mu.Lock()
-	a.callCache[issi] = call
-	a.cacheTTL[issi] = time.Now().Add(aprsCacheTTL)
-	a.mu.Unlock()
-
-	a.logger.Printf("APRS-IS: resolved ISSI %d -> %s", issi, call)
-	return call
+	return strings.ToUpper(result.Results[0].Callsign)
 }
 
 // Close shuts down the APRS-IS connection.
