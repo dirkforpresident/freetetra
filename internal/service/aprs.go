@@ -164,8 +164,8 @@ func (a *APRSBridge) SendPosition(issi uint32, lat, lon float64) {
 		lonDir = "W"
 	}
 
-	// APRS position: !DDMM.MMN/DDDMM.MME- (- = house symbol)
-	packet := fmt.Sprintf("%s>APTETR,TCPIP*:!%02d%05.2f%s/%03d%05.2f%s-TETRA ISSI:%d via FreeTetra\r\n",
+	// APRS position: !DDMM.MMN/DDDMM.MME[ ([ = person with HT / portable radio)
+	packet := fmt.Sprintf("%s>APTETR,TCPIP*:!%02d%05.2f%s/%03d%05.2f%s[TETRA ISSI:%d via FreeTetra\r\n",
 		call, latDeg, latMin, latDir, lonDeg, lonMin, lonDir, issi)
 
 	a.mu.Lock()
