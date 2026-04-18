@@ -180,6 +180,42 @@ func TryParseLIPFromSDS(sdsData []byte) (float64, float64, bool) {
 func (s *Service) registerPositionHandlers() {
 	s.server.RegisterHTTPHandler("/api/positions", s.handlePositions)
 	s.server.RegisterHTTPHandler("/api/positions/history", s.handlePositionHistory)
+	s.server.RegisterHTTPHandler("/api/positions/push", s.handlePositionPush)
+}
+
+// handlePositionPush accepts position reports from FreeTetra agents.
+// Used by the Pi-side agent to forward LIP positions to the central server,
+// which then forwards them to APRS-IS.
+//
+// POST /api/positions/push
+// {"positions": [{"issi": 2623563, "lat": 53.42, "lon": 9.95}, ...]}
+func (s *Service) handlePositionPush(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Positions []struct {
+			ISSI uint32  `json:"issi"`
+			Lat  float64 `json:"lat"`
+			Lon  float64 `json:"lon"`
+		} `json:"positions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	for _, p := range req.Positions {
+		if p.ISSI == 0 {
+			continue
+		}
+		s.positionStore.Update(p.ISSI, p.Lat, p.Lon)
+		if s.aprsBridge != nil {
+			go s.aprsBridge.SendPosition(p.ISSI, p.Lat, p.Lon)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "received": len(req.Positions)})
 }
 
 func (s *Service) handlePositions(w http.ResponseWriter, r *http.Request) {
