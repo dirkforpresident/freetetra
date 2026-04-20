@@ -52,6 +52,7 @@ type Service struct {
 	rateLimiter   *AuthRateLimiter
 	repeaters     *RepeaterHeartbeat
 	telemetry     *TelemetryServer
+	coverageDB    *CoverageDB
 }
 
 type activeCall struct {
@@ -96,6 +97,11 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 		s.motdStore = store
 	}
 	s.positionStore = newPositionStore(logger)
+	if cdb, err := newCoverageDB(logger); err == nil {
+		s.coverageDB = cdb
+	} else {
+		logger.Printf("CoverageDB: failed to open: %v (map will use in-memory only)", err)
+	}
 	s.rateLimiter = newAuthRateLimiter()
 	s.server = brew.NewServer(cfg, logger, s)
 

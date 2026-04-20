@@ -233,14 +233,54 @@ func (s *Service) registerPositionHandlers() {
 	s.server.RegisterHTTPHandler("/map", s.handleMapPage)
 }
 
-// handleMapData returns ALL historical positions (from JSONL log) for the map.
+// handleMapData returns hexagon aggregations or recent points based on zoom level.
+//
+// Query params:
+//
+//	res=5|7|9     H3 resolution (5=region, 7=city, 9=street)
+//	bbox=lat1,lon1,lat2,lon2   bounding box filter
+//	mode=hexes|points
 func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
-	all := s.positionStore.LoadAllFromLog()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=10")
+
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "hexes"
+	}
+
+	if s.coverageDB == nil {
+		// Fallback to JSONL
+		all := s.positionStore.LoadAllFromLog()
+		json.NewEncoder(w).Encode(map[string]any{"positions": all, "count": len(all)})
+		return
+	}
+
+	if mode == "points" {
+		samples, _ := s.coverageDB.RecentSamples(2000)
+		json.NewEncoder(w).Encode(map[string]any{"positions": samples, "count": len(samples)})
+		return
+	}
+
+	res := 7
+	if rs := r.URL.Query().Get("res"); rs != "" {
+		fmt.Sscanf(rs, "%d", &res)
+	}
+
+	hexes, err := s.coverageDB.AggregateHexes(res, nil, nil, nil, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	totalSamples, uniqueIssis := s.coverageDB.Stats()
 	json.NewEncoder(w).Encode(map[string]any{
-		"positions": all,
-		"count":     len(all),
+		"hexes":      hexes,
+		"resolution": res,
+		"stats": map[string]int{
+			"total_samples": totalSamples,
+			"unique_issis":  uniqueIssis,
+		},
 	})
 }
 
@@ -257,28 +297,51 @@ const coverageMapHTML = `<!DOCTYPE html>
 <title>FreeTetra Coverage Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: #e5e7eb; }
 .header {
-    padding: 14px 20px;
+    padding: 12px 20px;
     background: #111827;
     border-bottom: 1px solid #1f2937;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
 }
-.header h1 { font-size: 1.1rem; font-weight: 700; }
+.header h1 { font-size: 1.05rem; font-weight: 700; }
 .header h1 span { color: #6ee7b7; }
-.header .info { font-size: 0.85rem; color: #9ca3af; }
+.header .info { font-size: 0.82rem; color: #9ca3af; display: flex; gap: 14px; }
 .header .info b { color: #6ee7b7; font-family: 'JetBrains Mono', monospace; }
-#map { width: 100vw; height: calc(100vh - 50px); }
-.leaflet-popup-content {
-    color: #0a0d12;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82rem;
+.header a { color: #60a5fa; text-decoration: none; }
+#map { width: 100vw; height: calc(100vh - 56px); }
+
+.legend {
+    background: rgba(17, 24, 39, 0.95);
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #1f2937;
+    color: #e5e7eb;
+    font-size: 0.78rem;
+    line-height: 1.6;
 }
-.leaflet-popup-content b { color: #047857; }
+.legend .grad {
+    height: 8px;
+    border-radius: 4px;
+    margin: 6px 0;
+    background: linear-gradient(to right, #1e3a8a, #6ee7b7, #fbbf24, #ef4444);
+}
+.legend .scale { display: flex; justify-content: space-between; font-size: 0.7rem; color: #9ca3af; }
+
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #111827; color: #e5e7eb; border: 1px solid #1f2937; }
+.leaflet-popup-content {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: #e5e7eb;
+}
+.leaflet-popup-content b { color: #6ee7b7; }
 </style>
 </head>
 <body>
@@ -286,9 +349,11 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: 
 <div class="header">
     <h1>Free<span>Tetra</span> Coverage Map</h1>
     <div class="info">
-        <b id="point-count">0</b> Positionen ·
-        <b id="issi-count">0</b> Geraete ·
-        <a href="/" style="color:#60a5fa;text-decoration:none">&larr; zur Startseite</a>
+        <span><b id="stat-samples">0</b> Samples</span>
+        <span><b id="stat-issis">0</b> Geräte</span>
+        <span><b id="stat-hexes">0</b> Hexagone</span>
+        <span>Res: <b id="stat-res">7</b></span>
+        <a href="/">&larr; Start</a>
     </div>
 </div>
 
@@ -297,67 +362,108 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: 
 <script>
 const map = L.map("map", { worldCopyJump: true }).setView([51.5, 10.0], 6);
 
-// Dark tiles
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
     attribution: '&copy; OpenStreetMap &copy; CartoDB',
     subdomains: "abcd",
     maxZoom: 19
 }).addTo(map);
 
-// Color per ISSI (deterministic)
-function colorFor(issi) {
-    const hue = (issi * 137) % 360;
-    return "hsl(" + hue + ", 70%, 55%)";
+// Legend
+const legend = L.control({ position: "bottomright" });
+legend.onAdd = function() {
+    const div = L.DomUtil.create("div", "legend");
+    div.innerHTML =
+        "<div><b>Coverage Density</b></div>" +
+        "<div class=\"grad\"></div>" +
+        "<div class=\"scale\"><span>1</span><span>10</span><span>100</span><span>1000+</span></div>" +
+        "<div style=\"margin-top:6px;color:#9ca3af\">Auto-Resolution nach Zoom</div>";
+    return div;
+};
+legend.addTo(map);
+
+// Color scale: blue (low) → green → yellow → red (high)
+function densityColor(count, max) {
+    const t = Math.log10(count + 1) / Math.log10(max + 1);
+    if (t < 0.33) {
+        const k = t / 0.33;
+        return interpolateRGB([30, 58, 138], [110, 231, 183], k);
+    } else if (t < 0.66) {
+        const k = (t - 0.33) / 0.33;
+        return interpolateRGB([110, 231, 183], [251, 191, 36], k);
+    } else {
+        const k = Math.min(1, (t - 0.66) / 0.34);
+        return interpolateRGB([251, 191, 36], [239, 68, 68], k);
+    }
 }
 
-let layerGroup = L.layerGroup().addTo(map);
+function interpolateRGB(a, b, t) {
+    const r = Math.round(a[0] + (b[0] - a[0]) * t);
+    const g = Math.round(a[1] + (b[1] - a[1]) * t);
+    const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+    return "rgb(" + r + "," + g + "," + bl + ")";
+}
 
-async function loadPositions() {
+function resolutionForZoom(zoom) {
+    if (zoom < 8) return 5;   // ~8.5 km hexes
+    if (zoom < 12) return 7;  // ~1.2 km hexes
+    return 9;                  // ~174 m hexes
+}
+
+let hexLayer = L.layerGroup().addTo(map);
+let firstLoad = true;
+
+async function loadHexes() {
+    const zoom = map.getZoom();
+    const res = resolutionForZoom(zoom);
+
     try {
-        const r = await fetch("/api/map");
+        const r = await fetch("/api/map?res=" + res);
         const d = await r.json();
-        const positions = d.positions || [];
+        const hexes = d.hexes || [];
 
-        layerGroup.clearLayers();
-        const issis = new Set();
+        hexLayer.clearLayers();
+
+        const maxCount = hexes.reduce((m, h) => Math.max(m, h.n), 1);
         const bounds = [];
 
-        for (const p of positions) {
-            issis.add(p.issi);
-            const color = colorFor(p.issi);
-            const marker = L.circleMarker([p.lat, p.lon], {
-                radius: 5,
+        for (const h of hexes) {
+            // Get hexagon polygon from H3
+            const boundary = h3.cellToBoundary(h.h, false);
+            const color = densityColor(h.n, maxCount);
+            const polygon = L.polygon(boundary, {
                 color: color,
+                weight: 0.5,
                 fillColor: color,
-                fillOpacity: 0.7,
-                weight: 1,
+                fillOpacity: 0.55,
             });
-            marker.bindPopup(
-                "<b>ISSI " + p.issi + "</b><br>" +
-                p.lat.toFixed(5) + ", " + p.lon.toFixed(5) + "<br>" +
-                new Date(p.timestamp).toLocaleString("de-DE")
+            polygon.bindPopup(
+                "<b>" + h.n + " Sample(s)</b><br>" +
+                h.u + " Gerät(e)<br>" +
+                "Resolution: " + h.r + "<br>" +
+                h.lat.toFixed(5) + ", " + h.lon.toFixed(5) +
+                (h.rssi != null ? "<br>Avg RSSI: " + h.rssi + " dBm" : "")
             );
-            marker.addTo(layerGroup);
-            bounds.push([p.lat, p.lon]);
+            polygon.addTo(hexLayer);
+            bounds.push([h.lat, h.lon]);
         }
 
-        document.getElementById("point-count").textContent = positions.length;
-        document.getElementById("issi-count").textContent = issis.size;
+        document.getElementById("stat-samples").textContent = (d.stats?.total_samples ?? 0).toLocaleString("de-DE");
+        document.getElementById("stat-issis").textContent = d.stats?.unique_issis ?? 0;
+        document.getElementById("stat-hexes").textContent = hexes.length;
+        document.getElementById("stat-res").textContent = res;
 
-        if (bounds.length > 0 && layerGroup.getLayers().length > 0) {
-            // Only fit bounds on first load
-            if (!window._fitDone) {
-                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
-                window._fitDone = true;
-            }
+        if (firstLoad && bounds.length > 0) {
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
+            firstLoad = false;
         }
     } catch (e) {
         console.error(e);
     }
 }
 
-loadPositions();
-setInterval(loadPositions, 30000);
+loadHexes();
+map.on("zoomend", loadHexes);
+setInterval(loadHexes, 30000);
 </script>
 
 </body>
@@ -390,6 +496,9 @@ func (s *Service) handlePositionPush(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		s.positionStore.Update(p.ISSI, p.Lat, p.Lon)
+		if s.coverageDB != nil {
+			_ = s.coverageDB.Insert(p.ISSI, p.Lat, p.Lon, nil, nil)
+		}
 		if s.aprsBridge != nil {
 			go s.aprsBridge.SendPosition(p.ISSI, p.Lat, p.Lon)
 		}
@@ -433,6 +542,9 @@ func (s *Service) processSDSForPosition(sourceISSI uint32, sdsData []byte) {
 		return
 	}
 	s.positionStore.Update(sourceISSI, lat, lon)
+	if s.coverageDB != nil {
+		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil)
+	}
 	s.recordActivity("position",
 		fmt.Sprintf("ISSI=%d lat=%.4f lon=%.4f", sourceISSI, lat, lon),
 		map[string]any{"issi": sourceISSI, "lat": lat, "lon": lon},
