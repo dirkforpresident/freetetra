@@ -310,7 +310,7 @@ const coverageMapHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FreeTetra Coverage Map</title>
+<title>FreeTetra Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
@@ -415,7 +415,7 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 <body class="light">
 
 <div class="header">
-    <h1>Free<span>Tetra</span> Coverage Map</h1>
+    <h1>Free<span>Tetra</span> Map</h1>
     <div class="info">
         <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-repeaters">0/0</b> Repeater</span>
         <span><b id="stat-devices">0</b> Geräte</span>
