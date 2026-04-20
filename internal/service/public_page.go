@@ -70,17 +70,20 @@ const landingPageHTML = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-    --bg: #0a0d12;
-    --bg-card: #111827;
-    --border: #1f2937;
-    --accent: #6ee7b7;
-    --accent-dim: rgba(110,231,183,0.1);
-    --blue: #60a5fa;
-    --purple: #a78bfa;
-    --yellow: #fbbf24;
-    --red: #f87171;
-    --text: #e5e7eb;
-    --text-dim: #9ca3af;
+    --bg: #f9fafb;
+    --bg-card: #ffffff;
+    --bg-subtle: #f3f4f6;
+    --border: #e5e7eb;
+    --border-strong: #d1d5db;
+    --accent: #059669;
+    --accent-bright: #10b981;
+    --accent-dim: rgba(5,150,105,0.08);
+    --blue: #2563eb;
+    --purple: #7c3aed;
+    --yellow: #d97706;
+    --red: #dc2626;
+    --text: #111827;
+    --text-dim: #4b5563;
     --text-muted: #6b7280;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -156,6 +159,7 @@ body {
     border-radius: 12px;
     padding: 32px;
     margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(17,24,39,0.04), 0 1px 2px rgba(17,24,39,0.03);
 }
 .card h2 {
     font-size: 1.3rem;
@@ -178,7 +182,7 @@ body {
 .step {
     flex: 1;
     min-width: 220px;
-    background: var(--bg);
+    background: var(--bg-subtle);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 20px;
@@ -218,7 +222,7 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
-    background: var(--bg);
+    background: var(--bg-subtle);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 12px 18px;
@@ -277,7 +281,7 @@ body {
     color: var(--text-muted);
     margin-top: 16px;
     padding: 12px;
-    background: var(--bg);
+    background: var(--bg-subtle);
     border-radius: 8px;
     border: 1px solid var(--border);
 }
