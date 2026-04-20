@@ -274,12 +274,28 @@ func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	totalSamples, uniqueIssis := s.coverageDB.Stats()
+	devices24h := s.coverageDB.Devices24h()
+
+	// Repeater-Stats aus dem stationStore (online = letzter Push < 15 min)
+	var repsOnline, repsTotal int
+	if s.stationStore != nil {
+		for _, st := range s.stationStore.All() {
+			repsTotal++
+			if st.Online(stationOnlineWindow) {
+				repsOnline++
+			}
+		}
+	}
+
 	json.NewEncoder(w).Encode(map[string]any{
 		"hexes":      hexes,
 		"resolution": res,
 		"stats": map[string]int{
-			"total_samples": totalSamples,
-			"unique_issis":  uniqueIssis,
+			"total_samples":    totalSamples,
+			"unique_issis":     uniqueIssis,
+			"devices_24h":      devices24h,
+			"repeaters_online": repsOnline,
+			"repeaters_total":  repsTotal,
 		},
 	})
 }
@@ -341,6 +357,13 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 .header h1 { font-size: 1.05rem; font-weight: 700; }
 .header .info { font-size: 0.82rem; display: flex; gap: 14px; align-items: center; }
 .header .info b { font-family: 'JetBrains Mono', monospace; }
+.header .stat-group { display: inline-flex; align-items: center; gap: 6px; }
+.live-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #10b981; animation: pulse 2s infinite;
+}
+.live-dot.stale { background: #9ca3af; animation: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .header a { text-decoration: none; }
 #map { width: 100vw; height: calc(100vh - 56px); }
 
@@ -394,10 +417,8 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 <div class="header">
     <h1>Free<span>Tetra</span> Coverage Map</h1>
     <div class="info">
-        <span><b id="stat-samples">0</b> Samples</span>
-        <span class="hide-xs"><b id="stat-issis">0</b> Geräte</span>
-        <span><b id="stat-hexes">0</b> Hex</span>
-        <span class="hide-sm">Res: <b id="stat-res">7</b></span>
+        <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-repeaters">0/0</b> Repeater</span>
+        <span><b id="stat-devices">0</b> Geräte</span>
         <button class="theme-btn" onclick="toggleTheme()" id="theme-toggle">🌙 Dark</button>
         <a href="/">&larr; Start</a>
     </div>
@@ -582,10 +603,12 @@ async function loadHexes() {
             bounds.push([h.lat, h.lon]);
         }
 
-        document.getElementById("stat-samples").textContent = (d.stats?.total_samples ?? 0).toLocaleString("de-DE");
-        document.getElementById("stat-issis").textContent = d.stats?.unique_issis ?? 0;
-        document.getElementById("stat-hexes").textContent = hexes.length;
-        document.getElementById("stat-res").textContent = res;
+        const s = d.stats || {};
+        const online = s.repeaters_online ?? 0;
+        const total = s.repeaters_total ?? 0;
+        document.getElementById("stat-repeaters").textContent = online + "/" + total;
+        document.getElementById("stat-devices").textContent = s.devices_24h ?? 0;
+        document.getElementById("online-dot").classList.toggle("stale", online === 0);
 
         if (firstLoad && bounds.length > 0 && !userSetView) {
             map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });

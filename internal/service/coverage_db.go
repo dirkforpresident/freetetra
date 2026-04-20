@@ -245,6 +245,16 @@ func (cdb *CoverageDB) Stats() (totalSamples, uniqueIssis int) {
 	return
 }
 
+// Devices24h returns the number of distinct ISSIs seen in the last 24 hours.
+func (cdb *CoverageDB) Devices24h() int {
+	cdb.mu.RLock()
+	defer cdb.mu.RUnlock()
+	cutoff := time.Now().Add(-24 * time.Hour).Unix()
+	var n int
+	cdb.db.QueryRow(`SELECT COUNT(DISTINCT issi) FROM samples WHERE ts >= ?`, cutoff).Scan(&n)
+	return n
+}
+
 func (cdb *CoverageDB) Close() error {
 	if cdb.db != nil {
 		return cdb.db.Close()
