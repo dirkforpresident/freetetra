@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -19,22 +20,68 @@ type Position struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// PositionStore tracks the latest position per ISSI.
+// PositionStore tracks positions for coverage mapping.
+// In-memory: latest position per ISSI + recent history
+// On disk: ALL positions in a JSONL file (one line per position)
 type PositionStore struct {
 	mu        sync.RWMutex
 	positions map[uint32]*Position
-	history   []Position // last N position updates
+	history   []Position
 	logger    *log.Logger
+
+	logFile string // path to JSONL append-only log
 }
 
 const maxPositionHistory = 500
+const positionLogFile = "data/positions.jsonl"
 
 func newPositionStore(logger *log.Logger) *PositionStore {
-	return &PositionStore{
+	ps := &PositionStore{
 		positions: make(map[uint32]*Position),
 		history:   make([]Position, 0, maxPositionHistory),
 		logger:    logger,
+		logFile:   positionLogFile,
 	}
+	// Ensure data dir exists
+	_ = os.MkdirAll("data", 0755)
+	return ps
+}
+
+// AppendToLog writes a position to the JSONL log file.
+func (ps *PositionStore) appendToLog(p *Position) {
+	if ps.logFile == "" {
+		return
+	}
+	f, err := os.OpenFile(ps.logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	line, _ := json.Marshal(p)
+	f.Write(line)
+	f.Write([]byte("\n"))
+}
+
+// LoadAllFromLog reads all historical positions from the JSONL log.
+func (ps *PositionStore) LoadAllFromLog() []Position {
+	if ps.logFile == "" {
+		return nil
+	}
+	f, err := os.Open(ps.logFile)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	out := make([]Position, 0, 1000)
+	dec := json.NewDecoder(f)
+	for dec.More() {
+		var p Position
+		if err := dec.Decode(&p); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Update stores a new position for an ISSI.
@@ -54,6 +101,7 @@ func (ps *PositionStore) Update(issi uint32, lat, lon float64) {
 	if len(ps.history) > maxPositionHistory {
 		ps.history = ps.history[len(ps.history)-maxPositionHistory:]
 	}
+	ps.appendToLog(pos)
 	ps.logger.Printf("POSITION: ISSI=%d lat=%.6f lon=%.6f", issi, lat, lon)
 }
 
@@ -181,7 +229,139 @@ func (s *Service) registerPositionHandlers() {
 	s.server.RegisterHTTPHandler("/api/positions", s.handlePositions)
 	s.server.RegisterHTTPHandler("/api/positions/history", s.handlePositionHistory)
 	s.server.RegisterHTTPHandler("/api/positions/push", s.handlePositionPush)
+	s.server.RegisterHTTPHandler("/api/map", s.handleMapData)
+	s.server.RegisterHTTPHandler("/map", s.handleMapPage)
 }
+
+// handleMapData returns ALL historical positions (from JSONL log) for the map.
+func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
+	all := s.positionStore.LoadAllFromLog()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=10")
+	json.NewEncoder(w).Encode(map[string]any{
+		"positions": all,
+		"count":     len(all),
+	})
+}
+
+func (s *Service) handleMapPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(coverageMapHTML))
+}
+
+const coverageMapHTML = `<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FreeTetra Coverage Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: #e5e7eb; }
+.header {
+    padding: 14px 20px;
+    background: #111827;
+    border-bottom: 1px solid #1f2937;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.header h1 { font-size: 1.1rem; font-weight: 700; }
+.header h1 span { color: #6ee7b7; }
+.header .info { font-size: 0.85rem; color: #9ca3af; }
+.header .info b { color: #6ee7b7; font-family: 'JetBrains Mono', monospace; }
+#map { width: 100vw; height: calc(100vh - 50px); }
+.leaflet-popup-content {
+    color: #0a0d12;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+}
+.leaflet-popup-content b { color: #047857; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Free<span>Tetra</span> Coverage Map</h1>
+    <div class="info">
+        <b id="point-count">0</b> Positionen ·
+        <b id="issi-count">0</b> Geraete ·
+        <a href="/" style="color:#60a5fa;text-decoration:none">&larr; zur Startseite</a>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+const map = L.map("map", { worldCopyJump: true }).setView([51.5, 10.0], 6);
+
+// Dark tiles
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; OpenStreetMap &copy; CartoDB',
+    subdomains: "abcd",
+    maxZoom: 19
+}).addTo(map);
+
+// Color per ISSI (deterministic)
+function colorFor(issi) {
+    const hue = (issi * 137) % 360;
+    return "hsl(" + hue + ", 70%, 55%)";
+}
+
+let layerGroup = L.layerGroup().addTo(map);
+
+async function loadPositions() {
+    try {
+        const r = await fetch("/api/map");
+        const d = await r.json();
+        const positions = d.positions || [];
+
+        layerGroup.clearLayers();
+        const issis = new Set();
+        const bounds = [];
+
+        for (const p of positions) {
+            issis.add(p.issi);
+            const color = colorFor(p.issi);
+            const marker = L.circleMarker([p.lat, p.lon], {
+                radius: 5,
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.7,
+                weight: 1,
+            });
+            marker.bindPopup(
+                "<b>ISSI " + p.issi + "</b><br>" +
+                p.lat.toFixed(5) + ", " + p.lon.toFixed(5) + "<br>" +
+                new Date(p.timestamp).toLocaleString("de-DE")
+            );
+            marker.addTo(layerGroup);
+            bounds.push([p.lat, p.lon]);
+        }
+
+        document.getElementById("point-count").textContent = positions.length;
+        document.getElementById("issi-count").textContent = issis.size;
+
+        if (bounds.length > 0 && layerGroup.getLayers().length > 0) {
+            // Only fit bounds on first load
+            if (!window._fitDone) {
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+                window._fitDone = true;
+            }
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+loadPositions();
+setInterval(loadPositions, 30000);
+</script>
+
+</body>
+</html>`
 
 // handlePositionPush accepts position reports from FreeTetra agents.
 // Used by the Pi-side agent to forward LIP positions to the central server,
