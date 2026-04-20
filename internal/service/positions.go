@@ -393,7 +393,83 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 const LIGHT_TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 const DARK_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 
-const map = L.map("map", { worldCopyJump: true }).setView([51.5, 10.0], 6);
+const DEFAULT_CENTER = [51.5, 10.0];
+const DEFAULT_ZOOM = 6;
+
+// Parse URL hash like "#10/53.42/9.95"
+function parseUrlHash() {
+    const m = window.location.hash.match(/^#(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    return { zoom: parseFloat(m[1]), lat: parseFloat(m[2]), lng: parseFloat(m[3]) };
+}
+
+function loadSavedView() {
+    try { return JSON.parse(localStorage.getItem("freetetra-map-view")); } catch(e) { return null; }
+}
+
+const map = L.map("map", { worldCopyJump: true });
+
+// Initial view priority: URL hash > saved view > geolocation > default
+const urlView = parseUrlHash();
+const savedView = loadSavedView();
+let userSetView = false;
+
+if (urlView) {
+    map.setView([urlView.lat, urlView.lng], urlView.zoom);
+    userSetView = true;
+} else if (savedView) {
+    map.setView([savedView.lat, savedView.lng], savedView.zoom);
+    userSetView = true;
+} else {
+    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                if (!userSetView) {
+                    map.flyTo([pos.coords.latitude, pos.coords.longitude], 10);
+                    userSetView = true;
+                }
+            },
+            () => {},
+            { timeout: 4000, enableHighAccuracy: false, maximumAge: 60000 }
+        );
+    }
+}
+
+// Save view on pan/zoom + sync URL hash
+map.on("moveend zoomend", () => {
+    const c = map.getCenter();
+    const z = map.getZoom();
+    localStorage.setItem("freetetra-map-view", JSON.stringify({ lat: c.lat, lng: c.lng, zoom: z }));
+    const hash = "#" + z + "/" + c.lat.toFixed(4) + "/" + c.lng.toFixed(4);
+    if (window.location.hash !== hash) history.replaceState(null, "", hash);
+});
+
+// "Meine Position" button
+const locateCtrl = L.control({ position: "topleft" });
+locateCtrl.onAdd = function() {
+    const div = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+    const a = L.DomUtil.create("a", "", div);
+    a.href = "#";
+    a.title = "Meine Position";
+    a.innerHTML = "&#127758;";
+    a.style.fontSize = "16px";
+    a.style.lineHeight = "26px";
+    a.style.textAlign = "center";
+    L.DomEvent.on(a, "click", function(e) {
+        L.DomEvent.preventDefault(e);
+        L.DomEvent.stopPropagation(e);
+        if (!navigator.geolocation) return;
+        a.innerHTML = "&#8987;";
+        navigator.geolocation.getCurrentPosition(
+            (pos) => { a.innerHTML = "&#127758;"; map.flyTo([pos.coords.latitude, pos.coords.longitude], 12); },
+            () => { a.innerHTML = "&#10060;"; setTimeout(() => a.innerHTML = "&#127758;", 1500); },
+            { timeout: 8000, enableHighAccuracy: true }
+        );
+    });
+    return div;
+};
+locateCtrl.addTo(map);
 
 let tileLayer = L.tileLayer(LIGHT_TILES, {
     attribution: '&copy; OpenStreetMap &copy; CartoDB',
@@ -472,10 +548,11 @@ async function loadHexes() {
         document.getElementById("stat-hexes").textContent = hexes.length;
         document.getElementById("stat-res").textContent = res;
 
-        if (firstLoad && bounds.length > 0) {
+        if (firstLoad && bounds.length > 0 && !userSetView) {
             map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
-            firstLoad = false;
+            userSetView = true;
         }
+        firstLoad = false;
     } catch (e) {
         console.error(e);
     }
