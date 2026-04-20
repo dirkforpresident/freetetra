@@ -253,6 +253,15 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 	switch msg.Type {
 	case MsgHello:
 		h.logger.Printf("federation: hello from %s (version %d)", msg.Origin, msg.Version)
+		// Bootstrap peers are named from config (e.g. "peer-0"); after Hello
+		// the remote's real name becomes known. Rename + re-register so the
+		// gossip-based dedup (by name) doesn't create a duplicate connection
+		// to the same remote under its real identity.
+		if msg.Origin != "" && msg.Origin != peer.Name {
+			old := peer.Name
+			h.renamePeer(peer, msg.Origin)
+			h.logger.Printf("federation: renamed peer %s -> %s", old, msg.Origin)
+		}
 		h.sendPeerExchange(peer)
 		h.sendUsersDBOffer(peer)
 
@@ -650,14 +659,22 @@ func (h *Hub) sendPeerExchange(peer *Peer) {
 // Returns true if the peer was new.
 func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
 	h.knownMu.Lock()
+	// Dedup by name OR by URL — a bootstrap peer (e.g. "peer-0") may already
+	// point at the same URL under a different label.
 	if _, exists := h.knownPeers[name]; exists {
 		h.knownMu.Unlock()
 		return false
 	}
+	for _, existingURL := range h.knownPeers {
+		if existingURL == url {
+			h.knownMu.Unlock()
+			return false
+		}
+	}
 	h.knownPeers[name] = url
 	h.knownMu.Unlock()
 
-	// Check if already connected
+	// Check if already connected (by name)
 	h.mu.RLock()
 	alreadyConnected := false
 	for _, p := range h.peers {
@@ -684,15 +701,46 @@ func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
 func (h *Hub) registerPeer(peer *Peer) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	key := peer.Name
-	if peer.Direction == "incoming" {
-		key = peer.Name + ":in"
-	}
-	// Close existing peer with same key if any
+	key := peerKey(peer.Name, peer.Direction)
 	if old, ok := h.peers[key]; ok {
 		old.Close()
 	}
 	h.peers[key] = peer
+}
+
+// renamePeer updates a peer's Name and moves it to the correct map slot.
+// Used when a bootstrap-configured name differs from the Hello-reported Origin.
+func (h *Hub) renamePeer(peer *Peer, newName string) {
+	h.mu.Lock()
+	oldName := peer.Name
+	oldKey := peerKey(oldName, peer.Direction)
+	newKey := peerKey(newName, peer.Direction)
+	if oldKey != newKey {
+		if existing, ok := h.peers[newKey]; ok && existing != peer {
+			existing.Close()
+		}
+		delete(h.peers, oldKey)
+		peer.Name = newName
+		h.peers[newKey] = peer
+	}
+	h.mu.Unlock()
+
+	// Also relabel in the known-peers map so future gossip dedup works.
+	h.knownMu.Lock()
+	if url, ok := h.knownPeers[oldName]; ok {
+		delete(h.knownPeers, oldName)
+		if _, exists := h.knownPeers[newName]; !exists {
+			h.knownPeers[newName] = url
+		}
+	}
+	h.knownMu.Unlock()
+}
+
+func peerKey(name, direction string) string {
+	if direction == "incoming" {
+		return name + ":in"
+	}
+	return name
 }
 
 func (h *Hub) unregisterPeer(peer *Peer) {
