@@ -53,6 +53,7 @@ type Service struct {
 	repeaters     *RepeaterHeartbeat
 	telemetry     *TelemetryServer
 	coverageDB    *CoverageDB
+	stationStore  *stationStore
 }
 
 type activeCall struct {
@@ -155,12 +156,14 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	}
 
 	s.repeaters = newRepeaterHeartbeat()
+	s.stationStore = newStationStore(logger)
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.registerPublicHandlers()
 	s.registerRadioIDHandlers()
 	s.registerRepeaterHandlers()
 	s.registerTelemetryServer()
+	s.registerStationHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {

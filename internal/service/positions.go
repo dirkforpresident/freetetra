@@ -575,8 +575,51 @@ async function loadHexes() {
     }
 }
 
+// --- FreeTetra stations (Repeater/Hotspot/BlueStation) ---
+const stationLayer = L.layerGroup().addTo(map);
+
+function stationIcon(type, online) {
+    const color = online ? "#10b981" : "#9ca3af";
+    const symbol = type === "hotspot" ? "H" : type === "repeater" ? "R" : "B";
+    const html = '<div style="width:28px;height:28px;border-radius:50%;background:' + color +
+        ';border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);color:#fff;font-weight:700;font-family:monospace;font-size:13px;display:flex;align-items:center;justify-content:center;">' + symbol + '</div>';
+    return L.divIcon({ className: "station-icon", html, iconSize: [28, 28], iconAnchor: [14, 14] });
+}
+
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function stationPopup(st) {
+    const typeName = st.type === "hotspot" ? "Hotspot" : st.type === "repeater" ? "Repeater" : "BlueStation";
+    const dot = st.online ? '<span style="color:#10b981">&#9679; online</span>' : '<span style="color:#9ca3af">&#9675; offline</span>';
+    const rows = [];
+    rows.push("<b style='font-size:14px'>" + escapeHtml(st.callsign) + "</b> &middot; " + dot);
+    rows.push(typeName);
+    if (st.dl_freq) rows.push("DL: " + st.dl_freq.toFixed(4) + " MHz");
+    if (st.ul_freq) rows.push("UL: " + st.ul_freq.toFixed(4) + " MHz");
+    if (st.power_w) rows.push(st.power_w + " W");
+    if (st.antenna) rows.push("Antenne: " + escapeHtml(st.antenna));
+    if (st.notes) rows.push("<span style='color:#6b7280'>" + escapeHtml(st.notes) + "</span>");
+    if (st.website) rows.push("<a href='" + escapeHtml(st.website) + "' target='_blank' rel='noopener'>Website</a>");
+    return rows.join("<br>");
+}
+
+async function loadStations() {
+    try {
+        const r = await fetch("/api/stations");
+        const d = await r.json();
+        stationLayer.clearLayers();
+        for (const st of (d.stations || [])) {
+            const m = L.marker([st.lat, st.lon], { icon: stationIcon(st.type, st.online) });
+            m.bindPopup(stationPopup(st));
+            m.addTo(stationLayer);
+        }
+    } catch (e) { console.error(e); }
+}
+
 loadHexes();
+loadStations();
 map.on("zoomend", loadHexes);
+setInterval(loadStations, 60000);
 setInterval(loadHexes, 30000);
 </script>
 
