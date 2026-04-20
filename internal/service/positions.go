@@ -389,8 +389,9 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 <div id="map"></div>
 
 <script>
-const LIGHT_TILES = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-const DARK_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+// CartoDB Voyager — much more readable than light_all (clear roads, labels, terrain)
+const LIGHT_TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+const DARK_TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/dark_matter/{z}/{x}/{y}{r}.png";
 
 const map = L.map("map", { worldCopyJump: true }).setView([51.5, 10.0], 6);
 
@@ -483,10 +484,11 @@ async function loadHexes() {
             const boundary = h3.cellToBoundary(h.h, false);
             const color = densityColor(h.n, maxCount);
             const polygon = L.polygon(boundary, {
-                color: color,
-                weight: 0.5,
+                color: "#1f2937",
+                weight: 1.5,
+                opacity: 0.9,
                 fillColor: color,
-                fillOpacity: 0.55,
+                fillOpacity: 0.75,
             });
             polygon.bindPopup(
                 "<b>" + h.n + " Sample(s)</b><br>" +
