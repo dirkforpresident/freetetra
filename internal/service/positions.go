@@ -300,11 +300,38 @@ const coverageMapHTML = `<!DOCTYPE html>
 <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: #e5e7eb; }
+body { font-family: 'Inter', system-ui, sans-serif; transition: background 0.2s, color 0.2s; }
+
+/* Light theme (default) */
+body.light { background: #f9fafb; color: #1f2937; }
+body.light .header { background: #ffffff; border-bottom: 1px solid #e5e7eb; }
+body.light .header h1 span { color: #059669; }
+body.light .header .info { color: #6b7280; }
+body.light .header .info b { color: #059669; }
+body.light .header a { color: #2563eb; }
+body.light .legend { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5e7eb; color: #1f2937; }
+body.light .legend .scale { color: #6b7280; }
+body.light .leaflet-popup-content-wrapper, body.light .leaflet-popup-tip { background: #ffffff; color: #1f2937; border: 1px solid #e5e7eb; }
+body.light .leaflet-popup-content { color: #1f2937; }
+body.light .leaflet-popup-content b { color: #059669; }
+body.light .theme-btn { background: #f3f4f6; color: #1f2937; border: 1px solid #d1d5db; }
+
+/* Dark theme */
+body.dark { background: #0a0d12; color: #e5e7eb; }
+body.dark .header { background: #111827; border-bottom: 1px solid #1f2937; }
+body.dark .header h1 span { color: #6ee7b7; }
+body.dark .header .info { color: #9ca3af; }
+body.dark .header .info b { color: #6ee7b7; }
+body.dark .header a { color: #60a5fa; }
+body.dark .legend { background: rgba(17, 24, 39, 0.95); border: 1px solid #1f2937; color: #e5e7eb; }
+body.dark .legend .scale { color: #9ca3af; }
+body.dark .leaflet-popup-content-wrapper, body.dark .leaflet-popup-tip { background: #111827; color: #e5e7eb; border: 1px solid #1f2937; }
+body.dark .leaflet-popup-content { color: #e5e7eb; }
+body.dark .leaflet-popup-content b { color: #6ee7b7; }
+body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #374151; }
+
 .header {
     padding: 12px 20px;
-    background: #111827;
-    border-bottom: 1px solid #1f2937;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -312,18 +339,22 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: 
     gap: 10px;
 }
 .header h1 { font-size: 1.05rem; font-weight: 700; }
-.header h1 span { color: #6ee7b7; }
-.header .info { font-size: 0.82rem; color: #9ca3af; display: flex; gap: 14px; }
-.header .info b { color: #6ee7b7; font-family: 'JetBrains Mono', monospace; }
-.header a { color: #60a5fa; text-decoration: none; }
+.header .info { font-size: 0.82rem; display: flex; gap: 14px; align-items: center; }
+.header .info b { font-family: 'JetBrains Mono', monospace; }
+.header a { text-decoration: none; }
 #map { width: 100vw; height: calc(100vh - 56px); }
 
+.theme-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-family: inherit;
+}
+
 .legend {
-    background: rgba(17, 24, 39, 0.95);
     padding: 10px 14px;
     border-radius: 8px;
-    border: 1px solid #1f2937;
-    color: #e5e7eb;
     font-size: 0.78rem;
     line-height: 1.6;
 }
@@ -333,18 +364,15 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: 
     margin: 6px 0;
     background: linear-gradient(to right, #1e3a8a, #6ee7b7, #fbbf24, #ef4444);
 }
-.legend .scale { display: flex; justify-content: space-between; font-size: 0.7rem; color: #9ca3af; }
+.legend .scale { display: flex; justify-content: space-between; font-size: 0.7rem; }
 
-.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #111827; color: #e5e7eb; border: 1px solid #1f2937; }
 .leaflet-popup-content {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
-    color: #e5e7eb;
 }
-.leaflet-popup-content b { color: #6ee7b7; }
 </style>
 </head>
-<body>
+<body class="light">
 
 <div class="header">
     <h1>Free<span>Tetra</span> Coverage Map</h1>
@@ -353,6 +381,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: 
         <span><b id="stat-issis">0</b> Geräte</span>
         <span><b id="stat-hexes">0</b> Hexagone</span>
         <span>Res: <b id="stat-res">7</b></span>
+        <button class="theme-btn" onclick="toggleTheme()" id="theme-toggle">🌙 Dark</button>
         <a href="/">&larr; Start</a>
     </div>
 </div>
@@ -360,13 +389,36 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0a0d12; color: 
 <div id="map"></div>
 
 <script>
+const LIGHT_TILES = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+const DARK_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+
 const map = L.map("map", { worldCopyJump: true }).setView([51.5, 10.0], 6);
 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+let tileLayer = L.tileLayer(LIGHT_TILES, {
     attribution: '&copy; OpenStreetMap &copy; CartoDB',
     subdomains: "abcd",
     maxZoom: 19
 }).addTo(map);
+
+function applyTheme(theme) {
+    document.body.className = theme;
+    map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(theme === "dark" ? DARK_TILES : LIGHT_TILES, {
+        attribution: '&copy; OpenStreetMap &copy; CartoDB',
+        subdomains: "abcd",
+        maxZoom: 19
+    }).addTo(map);
+    document.getElementById("theme-toggle").textContent = theme === "dark" ? "☀ Light" : "🌙 Dark";
+    localStorage.setItem("freetetra-map-theme", theme);
+}
+
+function toggleTheme() {
+    const current = document.body.className;
+    applyTheme(current === "dark" ? "light" : "dark");
+}
+
+const savedTheme = localStorage.getItem("freetetra-map-theme") || "light";
+if (savedTheme === "dark") applyTheme("dark");
 
 // Legend
 const legend = L.control({ position: "bottomright" });
