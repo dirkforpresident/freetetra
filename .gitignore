@@ -1,8 +1,8 @@
-# Binaries
-freetetra
-freetetra-*
-tetra-brew
-tetra-brew-*
+# Binaries (build outputs at root only, not cmd/ subdirs)
+/freetetra
+/freetetra-*
+/tetra-brew
+/tetra-brew-*
 *.exe
 
 # Config (contains secrets)
