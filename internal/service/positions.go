@@ -370,6 +370,23 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
 }
+
+/* Mobile */
+@media (max-width: 640px) {
+    .header { padding: 8px 12px; gap: 6px; }
+    .header h1 { font-size: 0.95rem; flex-basis: 100%; }
+    .header .info { font-size: 0.72rem; gap: 10px; flex-wrap: wrap; }
+    .header .info .hide-sm { display: none; }
+    .theme-btn { padding: 3px 8px; font-size: 0.72rem; }
+    #map { height: calc(100vh - 78px); }
+    .legend { font-size: 0.7rem; padding: 8px 10px; }
+    .leaflet-control-zoom a { width: 32px !important; height: 32px !important; line-height: 32px !important; font-size: 18px !important; }
+    .leaflet-bar a { width: 32px !important; height: 32px !important; line-height: 32px !important; }
+}
+@media (max-width: 380px) {
+    .header h1 { font-size: 0.9rem; }
+    .header .info .hide-xs { display: none; }
+}
 </style>
 </head>
 <body class="light">
@@ -378,9 +395,9 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
     <h1>Free<span>Tetra</span> Coverage Map</h1>
     <div class="info">
         <span><b id="stat-samples">0</b> Samples</span>
-        <span><b id="stat-issis">0</b> Geräte</span>
-        <span><b id="stat-hexes">0</b> Hexagone</span>
-        <span>Res: <b id="stat-res">7</b></span>
+        <span class="hide-xs"><b id="stat-issis">0</b> Geräte</span>
+        <span><b id="stat-hexes">0</b> Hex</span>
+        <span class="hide-sm">Res: <b id="stat-res">7</b></span>
         <button class="theme-btn" onclick="toggleTheme()" id="theme-toggle">🌙 Dark</button>
         <a href="/">&larr; Start</a>
     </div>

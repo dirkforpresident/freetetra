@@ -202,6 +202,28 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
     animation: pulse 2s infinite;
 }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Tables scrollen horizontal auf schmalen Screens */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Mobile */
+@media (max-width: 700px) {
+    .container { padding: 14px; }
+    .header { margin-bottom: 16px; padding-bottom: 12px; flex-wrap: wrap; gap: 6px; }
+    .header h1 { font-size: 1.2rem; }
+    .header .server-name { font-size: 0.75rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
+    .stat { padding: 12px; }
+    .stat-value { font-size: 1.4rem; }
+    .stat-label { font-size: 0.65rem; }
+    .card { padding: 14px; margin-bottom: 12px; }
+    .card h2 { font-size: 0.9rem; }
+    table { font-size: 0.75rem; min-width: 480px; }
+    th, td { padding: 6px 8px; }
+    td.mono { font-size: 0.7rem; word-break: break-all; }
+    .activity-item { grid-template-columns: 60px 1fr; gap: 8px; font-size: 0.75rem; }
+    .activity-time { font-size: 0.68rem; }
+}
 </style>
 </head>
 <body>
@@ -234,37 +256,37 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 
 <div class="card">
     <h2>Repeater <span class="count" id="repeater-count">0</span></h2>
-    <table>
+    <div class="table-wrap"><table>
         <thead><tr><th>Name</th><th>Subscriber</th><th>IP</th><th>Letzte Aktivitaet</th></tr></thead>
         <tbody id="repeaters-body"></tbody>
-    </table>
+    </table></div>
     <div id="repeaters-empty" class="empty">Keine Repeater verbunden</div>
 </div>
 
 <div class="card">
     <h2>Subscribers <span class="count" id="subs-count">0</span></h2>
-    <table>
+    <div class="table-wrap"><table>
         <thead><tr><th>ISSI</th><th>Rufzeichen</th><th>Repeater</th></tr></thead>
         <tbody id="subs-body"></tbody>
-    </table>
+    </table></div>
     <div id="subs-empty" class="empty">Niemand eingebucht</div>
 </div>
 
 <div class="card">
     <h2>Peers <span class="count" id="peers-count">0</span></h2>
-    <table>
+    <div class="table-wrap"><table>
         <thead><tr><th>Server</th><th>Richtung</th><th>Remote Subscribers</th></tr></thead>
         <tbody id="peers-body"></tbody>
-    </table>
+    </table></div>
     <div id="peers-empty" class="empty">Keine Peers verbunden</div>
 </div>
 
 <div class="card">
     <h2>Letzte Positionen <span class="count" id="pos-count">0</span></h2>
-    <table>
+    <div class="table-wrap"><table>
         <thead><tr><th>ISSI</th><th>Latitude</th><th>Longitude</th><th>Zeit</th></tr></thead>
         <tbody id="positions-body"></tbody>
-    </table>
+    </table></div>
     <div id="positions-empty" class="empty">Keine Positionen empfangen</div>
 </div>
 

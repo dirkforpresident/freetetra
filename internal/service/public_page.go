@@ -286,6 +286,25 @@ body {
     color: var(--accent);
     font-size: 0.8rem;
 }
+
+/* Mobile */
+@media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    .hero { padding: 48px 0 24px; }
+    .hero h1 { font-size: 2rem; }
+    .hero .tagline { font-size: 0.95rem; margin-bottom: 28px; }
+    .stats { gap: 16px; margin-bottom: 40px; }
+    .stat { min-width: 90px; }
+    .stat-value { font-size: 1.6rem; }
+    .stat-label { font-size: 0.7rem; }
+    .card { padding: 20px; margin-bottom: 16px; }
+    .card h2 { font-size: 1.1rem; }
+    .card p { font-size: 0.9rem; }
+    .step { min-width: 100%; padding: 16px; }
+    .svc { min-width: 100%; padding: 10px 14px; }
+    .btn { padding: 9px 18px; font-size: 0.85rem; }
+    .footer { padding: 28px 0; font-size: 0.75rem; }
+}
 </style>
 </head>
 <body>
