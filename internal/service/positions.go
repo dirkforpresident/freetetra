@@ -421,40 +421,8 @@ function toggleTheme() {
 const savedTheme = localStorage.getItem("freetetra-map-theme") || "light";
 if (savedTheme === "dark") applyTheme("dark");
 
-// Legend
-const legend = L.control({ position: "bottomright" });
-legend.onAdd = function() {
-    const div = L.DomUtil.create("div", "legend");
-    div.innerHTML =
-        "<div><b>Coverage Density</b></div>" +
-        "<div class=\"grad\"></div>" +
-        "<div class=\"scale\"><span>1</span><span>10</span><span>100</span><span>1000+</span></div>" +
-        "<div style=\"margin-top:6px;color:#9ca3af\">Auto-Resolution nach Zoom</div>";
-    return div;
-};
-legend.addTo(map);
 
-// Color scale: blue (low) → green → yellow → red (high)
-function densityColor(count, max) {
-    const t = Math.log10(count + 1) / Math.log10(max + 1);
-    if (t < 0.33) {
-        const k = t / 0.33;
-        return interpolateRGB([30, 58, 138], [110, 231, 183], k);
-    } else if (t < 0.66) {
-        const k = (t - 0.33) / 0.33;
-        return interpolateRGB([110, 231, 183], [251, 191, 36], k);
-    } else {
-        const k = Math.min(1, (t - 0.66) / 0.34);
-        return interpolateRGB([251, 191, 36], [239, 68, 68], k);
-    }
-}
-
-function interpolateRGB(a, b, t) {
-    const r = Math.round(a[0] + (b[0] - a[0]) * t);
-    const g = Math.round(a[1] + (b[1] - a[1]) * t);
-    const bl = Math.round(a[2] + (b[2] - a[2]) * t);
-    return "rgb(" + r + "," + g + "," + bl + ")";
-}
+const HEX_COLOR = "#10b981"; // FreeTetra accent green
 
 function resolutionForZoom(zoom) {
     if (zoom < 8) return 5;   // ~8.5 km hexes
@@ -480,15 +448,13 @@ async function loadHexes() {
         const bounds = [];
 
         for (const h of hexes) {
-            // Get hexagon polygon from H3
             const boundary = h3.cellToBoundary(h.h, false);
-            const color = densityColor(h.n, maxCount);
             const polygon = L.polygon(boundary, {
-                color: "#1f2937",
+                color: "#047857",
                 weight: 1.5,
                 opacity: 0.9,
-                fillColor: color,
-                fillOpacity: 0.75,
+                fillColor: HEX_COLOR,
+                fillOpacity: 0.5,
             });
             polygon.bindPopup(
                 "<b>" + h.n + " Sample(s)</b><br>" +
