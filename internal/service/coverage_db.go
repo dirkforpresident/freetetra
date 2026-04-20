@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,16 +42,17 @@ func newCoverageDB(logger *log.Logger) (*CoverageDB, error) {
 
 	schema := `
 CREATE TABLE IF NOT EXISTS samples (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    issi    INTEGER NOT NULL,
-    lat     REAL NOT NULL,
-    lon     REAL NOT NULL,
-    rssi    INTEGER,
-    snr     INTEGER,
-    h9      INTEGER NOT NULL,
-    h7      INTEGER NOT NULL,
-    h5      INTEGER NOT NULL,
-    ts      INTEGER NOT NULL
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    issi     INTEGER NOT NULL,
+    lat      REAL NOT NULL,
+    lon      REAL NOT NULL,
+    rssi     INTEGER,
+    snr      INTEGER,
+    h9       INTEGER NOT NULL,
+    h7       INTEGER NOT NULL,
+    h5       INTEGER NOT NULL,
+    ts       INTEGER NOT NULL,
+    repeater TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_samples_h5 ON samples(h5);
 CREATE INDEX IF NOT EXISTS idx_samples_h7 ON samples(h7);
@@ -61,13 +63,16 @@ CREATE INDEX IF NOT EXISTS idx_samples_issi ON samples(issi);
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	// Migrate existing installs (ignore error if column already exists).
+	_, _ = db.Exec(`ALTER TABLE samples ADD COLUMN repeater TEXT`)
 
 	logger.Printf("CoverageDB: opened %s", coverageDBPath)
 	return &CoverageDB{db: db, logger: logger}, nil
 }
 
-// Insert adds a position sample.
-func (cdb *CoverageDB) Insert(issi uint32, lat, lon float64, rssi, snr *int) error {
+// Insert adds a position sample. `repeater` is the callsign of the station
+// that heard it (may be empty for anonymous / unknown sources).
+func (cdb *CoverageDB) Insert(issi uint32, lat, lon float64, rssi, snr *int, repeater string) error {
 	cdb.mu.Lock()
 	defer cdb.mu.Unlock()
 
@@ -93,22 +98,29 @@ func (cdb *CoverageDB) Insert(issi uint32, lat, lon float64, rssi, snr *int) err
 		snrVal = sql.NullInt64{Int64: int64(*snr), Valid: true}
 	}
 
+	var rep sql.NullString
+	if repeater != "" {
+		rep = sql.NullString{String: repeater, Valid: true}
+	}
+
 	_, err = cdb.db.Exec(
-		`INSERT INTO samples (issi, lat, lon, rssi, snr, h9, h7, h5, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		issi, lat, lon, rssiVal, snrVal, int64(h9), int64(h7), int64(h5), time.Now().Unix(),
+		`INSERT INTO samples (issi, lat, lon, rssi, snr, h9, h7, h5, ts, repeater) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		issi, lat, lon, rssiVal, snrVal, int64(h9), int64(h7), int64(h5), time.Now().Unix(), rep,
 	)
 	return err
 }
 
 // HexAggregation is one hexagon with sample count and (optional) avg RSSI.
 type HexAggregation struct {
-	HexID    string  `json:"h"`
-	Lat      float64 `json:"lat"`
-	Lon      float64 `json:"lon"`
-	Count    int     `json:"n"`
-	AvgRSSI  *int    `json:"rssi,omitempty"`
-	IssiSet  int     `json:"u"` // unique ISSIs
-	Resolution int   `json:"r"`
+	HexID      string   `json:"h"`
+	Lat        float64  `json:"lat"`
+	Lon        float64  `json:"lon"`
+	Count      int      `json:"n"`
+	AvgRSSI    *int     `json:"rssi,omitempty"`
+	IssiSet    int      `json:"u"`  // unique ISSIs
+	Resolution int      `json:"r"`
+	LastTs     int64    `json:"t"`  // most recent sample, unix seconds
+	Repeaters  []string `json:"rp,omitempty"`
 }
 
 // AggregateHexes returns hexagon aggregates for the given resolution.
@@ -130,7 +142,8 @@ func (cdb *CoverageDB) AggregateHexes(resolution int, minLat, minLon, maxLat, ma
 	}
 
 	query := fmt.Sprintf(`
-SELECT %s, COUNT(*) as n, COUNT(DISTINCT issi) as u, AVG(rssi) as avg_rssi
+SELECT %s, COUNT(*) as n, COUNT(DISTINCT issi) as u, AVG(rssi) as avg_rssi,
+       MAX(ts) as last_ts, GROUP_CONCAT(DISTINCT repeater) as reps
 FROM samples
 `, hexCol)
 
@@ -153,7 +166,9 @@ FROM samples
 		var hexID int64
 		var count, unique int
 		var avgRSSI sql.NullFloat64
-		if err := rows.Scan(&hexID, &count, &unique, &avgRSSI); err != nil {
+		var lastTs sql.NullInt64
+		var reps sql.NullString
+		if err := rows.Scan(&hexID, &count, &unique, &avgRSSI, &lastTs, &reps); err != nil {
 			continue
 		}
 
@@ -174,6 +189,16 @@ FROM samples
 		if avgRSSI.Valid {
 			r := int(avgRSSI.Float64)
 			agg.AvgRSSI = &r
+		}
+		if lastTs.Valid {
+			agg.LastTs = lastTs.Int64
+		}
+		if reps.Valid && reps.String != "" {
+			for _, r := range strings.Split(reps.String, ",") {
+				if r = strings.TrimSpace(r); r != "" {
+					agg.Repeaters = append(agg.Repeaters, r)
+				}
+			}
 		}
 		out = append(out, agg)
 	}

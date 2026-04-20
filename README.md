@@ -26,7 +26,7 @@ RadioID auto-auth, APRS-IS forwarding, and BlueStation telemetry added.
 ## Quick start
 
 ```bash
-git clone https://github.com/dirkforpresident/freetetra.git
+git clone https://github.com/freetetra/freetetra.git
 cd freetetra
 go build -o freetetra ./cmd/tetra-brew
 cp .env.example .env

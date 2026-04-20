@@ -516,6 +516,34 @@ if (savedTheme === "dark") applyTheme("dark");
 
 
 const HEX_COLOR = "#10b981"; // FreeTetra accent green
+const ONLINE_WINDOW_S = 15 * 60; // sample newer than 15 min ⇒ "online"
+
+function timeAgo(tsSec) {
+    if (!tsSec) return "—";
+    const diff = Math.max(0, Math.floor(Date.now() / 1000) - tsSec);
+    if (diff < 60) return "vor " + diff + " s";
+    if (diff < 3600) return "vor " + Math.floor(diff / 60) + " min";
+    if (diff < 86400) return "vor " + Math.floor(diff / 3600) + " h";
+    return "vor " + Math.floor(diff / 86400) + " Tagen";
+}
+
+function escapeHexHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function hexPopup(h) {
+    const now = Math.floor(Date.now() / 1000);
+    const online = h.t && (now - h.t) < ONLINE_WINDOW_S;
+    const dot = online
+        ? '<span style="color:#10b981;font-weight:600">&#9679; ONLINE</span>'
+        : '<span style="color:#9ca3af">&#9675; OFFLINE</span>';
+    const rows = [];
+    rows.push("<div style='font-size:13px;font-weight:600;color:#059669'>" + h.n + " Samples &middot; " + h.u + (h.u === 1 ? " Gerät" : " Geräte") + "</div>");
+    if (h.rp && h.rp.length) {
+        rows.push("<div style='font-size:12px;margin-top:4px'>Von: " + h.rp.map(escapeHexHtml).join(", ") + "</div>");
+    }
+    rows.push("<div style='font-size:12px;color:#6b7280;margin-top:4px'>Letzte: " + timeAgo(h.t) + "</div>");
+    rows.push("<div style='margin-top:6px'>" + dot + "</div>");
+    return rows.join("");
+}
 
 function resolutionForZoom(zoom) {
     if (zoom < 8) return 5;   // ~8.5 km hexes
@@ -549,13 +577,7 @@ async function loadHexes() {
                 fillColor: HEX_COLOR,
                 fillOpacity: 0.5,
             });
-            polygon.bindPopup(
-                "<b>" + h.n + " Sample(s)</b><br>" +
-                h.u + " Gerät(e)<br>" +
-                "Resolution: " + h.r + "<br>" +
-                h.lat.toFixed(5) + ", " + h.lon.toFixed(5) +
-                (h.rssi != null ? "<br>Avg RSSI: " + h.rssi + " dBm" : "")
-            );
+            polygon.bindPopup(hexPopup(h));
             polygon.addTo(hexLayer);
             bounds.push([h.lat, h.lon]);
         }
@@ -638,10 +660,12 @@ func (s *Service) handlePositionPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		Repeater  string `json:"repeater"`
 		Positions []struct {
-			ISSI uint32  `json:"issi"`
-			Lat  float64 `json:"lat"`
-			Lon  float64 `json:"lon"`
+			ISSI     uint32  `json:"issi"`
+			Lat      float64 `json:"lat"`
+			Lon      float64 `json:"lon"`
+			Repeater string  `json:"repeater"`
 		} `json:"positions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -652,9 +676,13 @@ func (s *Service) handlePositionPush(w http.ResponseWriter, r *http.Request) {
 		if p.ISSI == 0 {
 			continue
 		}
+		rep := p.Repeater
+		if rep == "" {
+			rep = req.Repeater
+		}
 		s.positionStore.Update(p.ISSI, p.Lat, p.Lon)
 		if s.coverageDB != nil {
-			_ = s.coverageDB.Insert(p.ISSI, p.Lat, p.Lon, nil, nil)
+			_ = s.coverageDB.Insert(p.ISSI, p.Lat, p.Lon, nil, nil, rep)
 		}
 		if s.aprsBridge != nil {
 			go s.aprsBridge.SendPosition(p.ISSI, p.Lat, p.Lon)
@@ -700,7 +728,7 @@ func (s *Service) processSDSForPosition(sourceISSI uint32, sdsData []byte) {
 	}
 	s.positionStore.Update(sourceISSI, lat, lon)
 	if s.coverageDB != nil {
-		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil)
+		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil, "")
 	}
 	s.recordActivity("position",
 		fmt.Sprintf("ISSI=%d lat=%.4f lon=%.4f", sourceISSI, lat, lon),
