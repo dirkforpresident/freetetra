@@ -389,9 +389,9 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 <div id="map"></div>
 
 <script>
-// CartoDB Voyager — much more readable than light_all (clear roads, labels, terrain)
+// CartoDB Voyager (light, default) and Dark Matter (dark)
 const LIGHT_TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-const DARK_TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/dark_matter/{z}/{x}/{y}{r}.png";
+const DARK_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 
 const map = L.map("map", { worldCopyJump: true }).setView([51.5, 10.0], 6);
 
