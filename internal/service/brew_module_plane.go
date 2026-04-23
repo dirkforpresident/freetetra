@@ -26,6 +26,13 @@ type BrewModulePlane struct {
 	cfg    config.Config
 	logger *log.Logger
 
+	// Optional override of cfg.Client. When set, all per-connection params
+	// (BaseURL, Path, Username, Password, timeouts) are taken from here
+	// instead of cfg.Client. Lets one process run multiple Brew clients
+	// with different connection targets (e.g. local + BrandMeister).
+	clientOverride *config.BrewClientConfig
+	label          string // optional log prefix to disambiguate multiple instances
+
 	subscriberISSI uint32
 	groups         []uint32
 
@@ -52,6 +59,26 @@ func NewBrewModulePlane(cfg config.Config, logger *log.Logger, subscriberISSI ui
 		send:              make(chan []byte, 1024),
 		channelAttachSubs: make(map[uint32]int),
 	}
+}
+
+// WithClient overrides the connection-level config (URL/path/auth/timeouts).
+// Returns the same plane for chaining.
+func (p *BrewModulePlane) WithClient(cc config.BrewClientConfig) *BrewModulePlane {
+	p.clientOverride = &cc
+	return p
+}
+
+// WithLabel sets a short prefix for log lines so multiple planes can be told apart.
+func (p *BrewModulePlane) WithLabel(label string) *BrewModulePlane {
+	p.label = label
+	return p
+}
+
+func (p *BrewModulePlane) client() config.BrewClientConfig {
+	if p.clientOverride != nil {
+		return *p.clientOverride
+	}
+	return p.cfg.Client
 }
 
 func (p *BrewModulePlane) SetMessageHandlers(
@@ -212,7 +239,7 @@ func (p *BrewModulePlane) setConnected(v bool) {
 }
 
 func (p *BrewModulePlane) discoverEndpoint(ctx context.Context) (string, error) {
-	baseURL, err := url.Parse(strings.TrimSpace(p.cfg.Client.BaseURL))
+	baseURL, err := url.Parse(strings.TrimSpace(p.client().BaseURL))
 	if err != nil {
 		return "", fmt.Errorf("invalid BREW_CLIENT_BASE_URL: %w", err)
 	}
@@ -220,7 +247,7 @@ func (p *BrewModulePlane) discoverEndpoint(ctx context.Context) (string, error) 
 		baseURL.Scheme = "http"
 	}
 	discoveryURL := *baseURL
-	discoveryURL.Path = joinURLPath(baseURL.Path, p.cfg.Client.Path)
+	discoveryURL.Path = joinURLPath(baseURL.Path, p.client().Path)
 	if !strings.HasSuffix(discoveryURL.Path, "/") {
 		discoveryURL.Path += "/"
 	}
@@ -235,7 +262,7 @@ func (p *BrewModulePlane) discoverEndpoint(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("brew discovery request failed: %w", err)
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized && p.cfg.Client.Username != "" {
+	if resp.StatusCode == http.StatusUnauthorized && p.client().Username != "" {
 		challenge := resp.Header.Get("WWW-Authenticate")
 		_ = resp.Body.Close()
 		authHeader := p.buildDigestAuthorization(challenge, req)
@@ -301,7 +328,7 @@ func (p *BrewModulePlane) buildDigestAuthorization(challenge string, req *http.R
 	nc := "00000001"
 	cnonce := randomHex(8)
 
-	ha1 := md5HexString(fmt.Sprintf("%s:%s:%s", p.cfg.Client.Username, realm, p.cfg.Client.Password))
+	ha1 := md5HexString(fmt.Sprintf("%s:%s:%s", p.client().Username, realm, p.client().Password))
 	ha2 := md5HexString(fmt.Sprintf("%s:%s", req.Method, uri))
 	response := ""
 	if qop != "" {
@@ -312,7 +339,7 @@ func (p *BrewModulePlane) buildDigestAuthorization(challenge string, req *http.R
 
 	header := fmt.Sprintf(
 		`Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s"`,
-		p.cfg.Client.Username,
+		p.client().Username,
 		realm,
 		nonce,
 		uri,
@@ -370,24 +397,24 @@ func (p *BrewModulePlane) GroupSubscriberCount(gssi uint32) int {
 }
 
 func (p *BrewModulePlane) reconnectDelay() time.Duration {
-	if p.cfg.Client.ReconnectDelay <= 0 {
+	if p.client().ReconnectDelay <= 0 {
 		return 3 * time.Second
 	}
-	return p.cfg.Client.ReconnectDelay
+	return p.client().ReconnectDelay
 }
 
 func (p *BrewModulePlane) discoveryTimeout() time.Duration {
-	if p.cfg.Client.DiscoveryTimeout <= 0 {
+	if p.client().DiscoveryTimeout <= 0 {
 		return 5 * time.Second
 	}
-	return p.cfg.Client.DiscoveryTimeout
+	return p.client().DiscoveryTimeout
 }
 
 func (p *BrewModulePlane) writeTimeout() time.Duration {
-	if p.cfg.Client.WriteTimeout <= 0 {
+	if p.client().WriteTimeout <= 0 {
 		return 5 * time.Second
 	}
-	return p.cfg.Client.WriteTimeout
+	return p.client().WriteTimeout
 }
 
 func joinURLPath(basePath, appendPath string) string {
