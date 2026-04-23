@@ -66,14 +66,20 @@ func main() {
 	bmPlane := service.NewBrewModulePlane(cfg, logger, bmISSI, tgs).
 		WithClient(bmConn).WithLabel("BM")
 
-	bridge := dmrbridge.New(logger, ftPlane, bmPlane, tgs)
+	// Optional source overrides for outbound calls. 0 = pass through original.
+	// Set DMRBRIDGE_BM_SOURCE_OVERRIDE if BrandMeister rejects calls because
+	// the radio's TETRA ISSI doesn't match a registered hotspot ID.
+	bmSourceOverride := envUint("DMRBRIDGE_BM_SOURCE_OVERRIDE", 0)
+	ftSourceOverride := envUint("DMRBRIDGE_FT_SOURCE_OVERRIDE", 0)
+
+	bridge := dmrbridge.New(logger, ftPlane, bmPlane, ftSourceOverride, bmSourceOverride, tgs)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	logger.Printf("dmrbridge: FT=%s as %d (auth %s), BM=%s as %d (auth %s), TGs=%v",
-		ftConn.BaseURL, ftISSI, ftConn.Username,
-		bmConn.BaseURL, bmISSI, bmConn.Username, tgs)
+	logger.Printf("dmrbridge: FT=%s as %d (auth %s, override=%d), BM=%s as %d (auth %s, override=%d), TGs=%v",
+		ftConn.BaseURL, ftISSI, ftConn.Username, ftSourceOverride,
+		bmConn.BaseURL, bmISSI, bmConn.Username, bmSourceOverride, tgs)
 
 	if err := bridge.Start(ctx); err != nil {
 		logger.Fatalf("bridge: %v", err)

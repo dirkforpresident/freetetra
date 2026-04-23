@@ -24,6 +24,12 @@ type Bridge struct {
 	ft     *service.BrewModulePlane
 	bm     *service.BrewModulePlane
 
+	// Source ISSI to advertise when we transmit on each side. BM in particular
+	// requires the source to match the registered hotspot ID, otherwise it
+	// silently drops the call. Set bmSource to the BM hotspot's DMR ID.
+	ftSource uint32
+	bmSource uint32
+
 	talkgroups map[uint32]struct{}
 
 	mu sync.Mutex
@@ -43,7 +49,7 @@ type mirror struct {
 // New constructs a bridge that mirrors `talkgroups` between the two planes.
 // `ft` connects to FreeTetra, `bm` connects to the BrandMeister-facing
 // TetraPack core.
-func New(logger *log.Logger, ft, bm *service.BrewModulePlane, talkgroups []uint32) *Bridge {
+func New(logger *log.Logger, ft, bm *service.BrewModulePlane, ftSource, bmSource uint32, talkgroups []uint32) *Bridge {
 	tgs := make(map[uint32]struct{}, len(talkgroups))
 	for _, tg := range talkgroups {
 		if tg != 0 {
@@ -54,6 +60,8 @@ func New(logger *log.Logger, ft, bm *service.BrewModulePlane, talkgroups []uint3
 		logger:     logger,
 		ft:         ft,
 		bm:         bm,
+		ftSource:   ftSource,
+		bmSource:   bmSource,
 		talkgroups: tgs,
 		ftCalls:    make(map[uuid.UUID]*mirror),
 		bmCalls:    make(map[uuid.UUID]*mirror),
@@ -117,20 +125,20 @@ func (b *Bridge) gcLoop(ctx context.Context) {
 	}
 }
 
-// --- FreeTetra side: incoming events get mirrored to BM ---
+// --- FreeTetra side: incoming events get mirrored to BM (using bmSource as TX identity) ---
 
 func (b *Bridge) onFTCall(m *brew.CallControlMessage) {
-	b.handleCall(m, "FT", "BM", b.ftCalls, b.bmCalls, b.mineFT, b.mineBM, b.bm)
+	b.handleCall(m, "FT", "BM", b.ftCalls, b.bmCalls, b.mineFT, b.mineBM, b.bm, b.bmSource)
 }
 
 func (b *Bridge) onFTFrame(m *brew.FrameMessage) {
 	b.handleFrame(m, "FT", "BM", b.ftCalls, b.mineFT, b.bm)
 }
 
-// --- BrandMeister side: incoming events get mirrored to FT ---
+// --- BrandMeister side: incoming events get mirrored to FT (passing through original DMR source) ---
 
 func (b *Bridge) onBMCall(m *brew.CallControlMessage) {
-	b.handleCall(m, "BM", "FT", b.bmCalls, b.ftCalls, b.mineBM, b.mineFT, b.ft)
+	b.handleCall(m, "BM", "FT", b.bmCalls, b.ftCalls, b.mineBM, b.mineFT, b.ft, 0)
 }
 
 func (b *Bridge) onBMFrame(m *brew.FrameMessage) {
@@ -149,6 +157,7 @@ func (b *Bridge) handleCall(
 	srcCalls, dstCalls map[uuid.UUID]*mirror,
 	mineSrc, mineDst map[uuid.UUID]struct{},
 	dstPlane *service.BrewModulePlane,
+	sourceOverride uint32, // 0 = pass through original source
 ) {
 	id := m.Identifier
 
@@ -179,12 +188,16 @@ func (b *Bridge) handleCall(
 		mineDst[mirrorID] = struct{}{}
 		b.mu.Unlock()
 
+		txSource := gp.Source
+		if sourceOverride != 0 {
+			txSource = sourceOverride
+		}
 		ok2 := dstPlane.StartInjectedGroupTX("dmrbridge",
-			mirrorID, gp.Source, gp.Destination,
+			mirrorID, txSource, gp.Destination,
 			gp.Priority, gp.Access, gp.Service)
 		if ok2 {
-			b.logger.Printf("dmrbridge: %s→%s call start TG=%d src=%d (id %s→%s)",
-				srcLabel, dstLabel, gp.Destination, gp.Source, shortID(id), shortID(mirrorID))
+			b.logger.Printf("dmrbridge: %s→%s call start TG=%d src=%d (orig %d, id %s→%s)",
+				srcLabel, dstLabel, gp.Destination, txSource, gp.Source, shortID(id), shortID(mirrorID))
 		} else {
 			b.logger.Printf("dmrbridge: %s→%s call start REJECTED (TG=%d busy?)",
 				srcLabel, dstLabel, gp.Destination)
