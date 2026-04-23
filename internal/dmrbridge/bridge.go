@@ -159,13 +159,18 @@ func (b *Bridge) handleCall(
 	}
 	b.mu.Unlock()
 
+	b.logger.Printf("dmrbridge: %s call rx state=%d id=%s payload-type=%T",
+		srcLabel, m.CallState, shortID(id), m.Payload)
+
 	switch m.CallState {
 	case brew.CallStateGroupTX:
 		gp, ok := m.Payload.(brew.GroupTransmissionPayload)
 		if !ok {
+			b.logger.Printf("dmrbridge: %s GroupTX payload not GroupTransmissionPayload (got %T)", srcLabel, m.Payload)
 			return
 		}
 		if !b.bridges(gp.Destination) {
+			b.logger.Printf("dmrbridge: %s GroupTX TG=%d not in bridge list", srcLabel, gp.Destination)
 			return
 		}
 		mirrorID := uuid.New()
