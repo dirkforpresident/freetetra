@@ -146,18 +146,15 @@ pre {
         <p>Du brauchst eine <a href="https://radioid.net">RadioID</a> (= DMR-ID). Wenn du noch keine hast: dort registrieren mit deinem Funkamateur-Rufzeichen. Dauert 1-2 Tage. Deine ISSI fuer TETRA ist die <code>RadioID + 2 Stellen SSID</code> (z.B. <code>2623563</code> + <code>00</code> = <code>262356300</code>).</p>
 
         <h3>Config — Brew-Host eintragen</h3>
-        <p>In deiner <code>config.toml</code> nur diese Section anpassen:</p>
+        <p>Das ist die einzige FreeTetra-spezifische Section in deiner <code>config.toml</code>:</p>
         <pre>[brew]
 host = "freetetra.de"
 port = 443
 tls = true
 username = DEINE_ISSI         # z.B. 262356300
-password = "blafablafa"       # Shared Key fuer alle RadioID-User
-
-[net_info]
-mcc = 901
-mnc = 8888</pre>
-        <p>Plus SDR-Frequenzen + Cell-Info wie in der BlueStation-Doku. Beim Start meldet sich dein Funkgeraet automatisch an — keine Account-Registrierung noetig, RadioID wird gegen radioid.net verifiziert.</p>
+password = "blafablafa"       # Shared Key fuer alle RadioID-User</pre>
+        <p>Der Rest der BlueStation-Config (SDR-Frequenzen, <code>[net_info]</code> mit MCC/MNC entsprechend deinem Funkgeraet, <code>[cell_info]</code> etc.) ist BlueStation-User-Setup und in der BlueStation-Doku beschrieben.</p>
+        <p>Beim Start meldet sich dein Funkgeraet automatisch an — keine Account-Registrierung noetig, RadioID wird gegen radioid.net verifiziert.</p>
     </div>
 
     <div class="card">
