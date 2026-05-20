@@ -27,6 +27,7 @@ type CallHandler interface {
 	OnPeerCallEnd(peerName string, callUUID string, cause uint8)
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
+	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string)
 	GetLocalSubscribers() map[uint32][]uint32
 
 	// Users DB sync (optional — return empty if not available)
@@ -385,6 +386,15 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 			relay := h.mesh.PrepareRelay(&msg)
 			h.relayToPeers(relay, peer.Name)
 		}
+
+	case MsgPositionSample:
+		if h.handler != nil {
+			h.handler.OnPeerPositionSample(peer.Name, msg.ISSI, msg.Lat, msg.Lon, msg.Repeater)
+		}
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.relayToPeers(relay, peer.Name)
+		}
 	}
 }
 
@@ -486,6 +496,21 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 		h.callMu.Unlock()
 	}
 	h.mu.RUnlock()
+}
+
+// BroadcastPositionSample sendet einen empfangenen Position-Sample an alle Peers
+// (Coverage-Federation). Mesh-Router dedupliziert + relayed.
+func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, repeater string) {
+	msg := &Message{
+		Type:     MsgPositionSample,
+		Origin:   h.serverName,
+		ISSI:     issi,
+		Lat:      lat,
+		Lon:      lon,
+		Repeater: repeater,
+	}
+	h.mesh.PrepareOutgoing(msg)
+	h.broadcastToAllPeers(msg)
 }
 
 // BroadcastCallEnd notifies all peers about a call ending.

@@ -267,7 +267,17 @@ func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(rs, "%d", &res)
 	}
 
-	hexes, err := s.coverageDB.AggregateHexes(res, nil, nil, nil, nil)
+	// Default time-decay: 90 Tage. Param "days=N" oder "days=0" fuer alles.
+	days := 90
+	if d := r.URL.Query().Get("days"); d != "" {
+		fmt.Sscanf(d, "%d", &days)
+	}
+	var sinceTs int64 = 0
+	if days > 0 {
+		sinceTs = time.Now().Unix() - int64(days)*86400
+	}
+
+	hexes, err := s.coverageDB.AggregateHexes(res, nil, nil, nil, nil, sinceTs)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -749,14 +759,22 @@ func (s *Service) processSDSForPosition(sourceISSI uint32, sdsData []byte) {
 	if !ok {
 		return
 	}
+	// Repeater-Tag = lokaler Server-Name (FEDERATION_NAME). Bei Federation-
+	// incoming Samples wird der Peer-Name als Tag verwendet.
+	repeater := s.cfg.Federation.Name
 	s.positionStore.Update(sourceISSI, lat, lon)
 	if s.coverageDB != nil {
-		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil, "")
+		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil, repeater)
 	}
 	s.recordActivity("position",
 		fmt.Sprintf("ISSI=%d lat=%.4f lon=%.4f", sourceISSI, lat, lon),
 		map[string]any{"issi": sourceISSI, "lat": lat, "lon": lon},
 	)
+
+	// Federation-Sync: an alle Peers schicken
+	if s.federation != nil {
+		s.federation.NotifyPositionSample(sourceISSI, lat, lon, repeater)
+	}
 
 	// Forward to APRS-IS
 	if s.aprsBridge != nil {

@@ -173,6 +173,24 @@ func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, f
 	fb.svc.server.BroadcastToGroup(call.DestinationGSI, wire, "")
 }
 
+// OnPeerPositionSample wird vom Federation-Hub aufgerufen, wenn ein Peer
+// einen Position-Sample meldet (Coverage-Federation). Wir speichern den
+// Sample in der lokalen Coverage-DB damit unsere Map die Gesamt-Welt zeigt.
+func (fb *federationBridge) OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string) {
+	if fb.svc.coverageDB == nil {
+		return
+	}
+	// Repeater-Tag = der Server-Name der den Sample empfangen hat. Wenn der
+	// Origin-Repeater leer war, fallback auf peer-Name.
+	if repeater == "" {
+		repeater = peerName
+	}
+	_ = fb.svc.coverageDB.Insert(issi, lat, lon, nil, nil, repeater)
+	if fb.svc.positionStore != nil {
+		fb.svc.positionStore.Update(issi, lat, lon)
+	}
+}
+
 func (fb *federationBridge) OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string) {
 	sdsData, err := hex.DecodeString(sdsDataHex)
 	if err != nil {
@@ -230,6 +248,15 @@ func (fb *federationBridge) NotifySubscriberUpdate(issi uint32, action string, g
 		return
 	}
 	fb.hub.BroadcastSubscriber(issi, action, gssis)
+}
+
+// NotifyPositionSample sendet einen empfangenen LIP-Sample (lat/lon) an alle
+// Federation-Peers — fuer geteilte Coverage-Map.
+func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, repeater string) {
+	if fb.hub == nil {
+		return
+	}
+	fb.hub.BroadcastPositionSample(issi, lat, lon, repeater)
 }
 
 // NotifyCallStart notifies peers about a local group call start.

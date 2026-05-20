@@ -125,7 +125,9 @@ type HexAggregation struct {
 
 // AggregateHexes returns hexagon aggregates for the given resolution.
 // Optional bounding box filter (lat/lon min/max).
-func (cdb *CoverageDB) AggregateHexes(resolution int, minLat, minLon, maxLat, maxLon *float64) ([]HexAggregation, error) {
+// `sinceTs` (Unix-Sekunden, 0 = kein Filter) schliesst aeltere Samples aus —
+// damit die Map nicht von uralten Eintraegen verschmutzt wird.
+func (cdb *CoverageDB) AggregateHexes(resolution int, minLat, minLon, maxLat, maxLon *float64, sinceTs int64) ([]HexAggregation, error) {
 	cdb.mu.RLock()
 	defer cdb.mu.RUnlock()
 
@@ -148,9 +150,17 @@ FROM samples
 `, hexCol)
 
 	args := []any{}
+	whereParts := []string{}
 	if minLat != nil && minLon != nil && maxLat != nil && maxLon != nil {
-		query += " WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"
+		whereParts = append(whereParts, "lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?")
 		args = append(args, *minLat, *maxLat, *minLon, *maxLon)
+	}
+	if sinceTs > 0 {
+		whereParts = append(whereParts, "ts >= ?")
+		args = append(args, sinceTs)
+	}
+	if len(whereParts) > 0 {
+		query += " WHERE " + strings.Join(whereParts, " AND ")
 	}
 
 	query += fmt.Sprintf(` GROUP BY %s LIMIT 10000`, hexCol)
