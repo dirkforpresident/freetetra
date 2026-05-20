@@ -118,7 +118,16 @@ func (s *stationStore) Upsert(in Station) (*Station, error) {
 	} else {
 		in.FirstSeenUnix = now
 	}
-	in.LastSeenUnix = now
+	// LastSeenUnix nur ueberschreiben wenn nicht im Input gesetzt (= lokal-push).
+	// Bei Federation-Empfang behalten wir den Origin-Timestamp damit eine
+	// laengst offline Station nicht jedes Mal "wieder online" wird wenn ein
+	// Peer ihren alten Eintrag periodisch syncht.
+	if in.LastSeenUnix <= 0 || in.LastSeenUnix > now {
+		in.LastSeenUnix = now
+	} else if existing != nil && existing.LastSeenUnix > in.LastSeenUnix {
+		// Lokaler Stand ist neuer als der gefederierte — behalten.
+		in.LastSeenUnix = existing.LastSeenUnix
+	}
 	s.items[in.StationID] = &in
 	s.save()
 	return &in, nil
