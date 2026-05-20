@@ -122,6 +122,9 @@ func (fb *federationBridge) OnPeerCallStart(peerName string, callUUID string, so
 		OriginClientID:  "federation:" + peerName,
 	}
 	fb.svc.callMu.Unlock()
+	if fb.svc.lastHeard != nil {
+		fb.svc.lastHeard.Start(uid, sourceISSI, destGSSI, "peer:"+peerName)
+	}
 }
 
 func (fb *federationBridge) OnPeerCallEnd(peerName string, callUUID string, cause uint8) {
@@ -145,6 +148,9 @@ func (fb *federationBridge) OnPeerCallEnd(peerName string, callUUID string, caus
 	fb.svc.callMu.Lock()
 	delete(fb.svc.calls, uid)
 	fb.svc.callMu.Unlock()
+	if fb.svc.lastHeard != nil {
+		fb.svc.lastHeard.End(uid)
+	}
 }
 
 func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte) {
