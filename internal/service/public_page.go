@@ -30,11 +30,16 @@ func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 
 	positions := s.positionStore.Latest()
 
+	serverName := "FreeTetra"
+	if s.cfg.Federation.Name != "" {
+		serverName = "FreeTetra " + s.cfg.Federation.Name
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "public, max-age=5")
 	json.NewEncoder(w).Encode(map[string]any{
-		"server":      "FreeTetra DO0RAM",
+		"server":      serverName,
 		"version":     "1.0",
 		"uptime":      time.Since(startTime).String(),
 		"repeaters":   repeaterCount,
