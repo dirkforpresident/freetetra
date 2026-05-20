@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http"
+	"strings"
 )
 
 func (s *Service) registerLiveHandlers() {
@@ -15,15 +16,23 @@ func (s *Service) handleLivePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(liveHTML))
+	w.Write([]byte(s.renderLivePage(detectLang(r))))
+}
+
+func (s *Service) renderLivePage(lang Lang) string {
+	out := translate(liveHTML, lang)
+	return strings.NewReplacer(
+		"{{LANG_HTML_ATTR}}", string(lang),
+		"{{LANG_SWITCH}}", langSwitchHTML(lang),
+	).Replace(out)
 }
 
 const liveHTML = `<!DOCTYPE html>
-<html lang="de">
+<html lang="{{LANG_HTML_ATTR}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FreeTetra Live</title>
+<title>{{T:live.title}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -117,6 +126,10 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .foot { text-align: center; padding: 24px 0; color: var(--text-muted); font-size: 0.78rem; }
+.lang-toggle { position: absolute; top: 16px; right: 20px; font-size: 0.78rem; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); }
+.lang-link { color: var(--text-muted); text-decoration: none; padding: 2px 6px; border-radius: 4px; }
+.lang-link:hover { color: var(--accent); }
+.lang-link.lang-active { color: var(--accent); font-weight: 700; }
 
 @media (max-width: 640px) {
     .container { padding: 14px; }
@@ -152,6 +165,7 @@ a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
+<div class="lang-toggle">{{LANG_SWITCH}}</div>
 <div class="container">
     <div class="header">
         <h1>Free<span>Tetra</span> Live</h1>
@@ -159,17 +173,17 @@ a:hover { text-decoration: underline; }
     </div>
 
     <div class="card">
-        <h2>Aktive Calls <span id="active-count" style="float:right;font-family:'JetBrains Mono',monospace;color:var(--accent)">0</span></h2>
-        <div id="active-list"><div class="empty">Stille auf der Frequenz.</div></div>
+        <h2>{{T:live.active_calls}} <span id="active-count" style="float:right;font-family:'JetBrains Mono',monospace;color:var(--accent)">0</span></h2>
+        <div id="active-list"><div class="empty">{{T:live.silent}}</div></div>
     </div>
 
     <div class="card">
-        <h2>Last Heard</h2>
-        <div id="last-list"><div class="empty">Noch keine Calls aufgezeichnet.</div></div>
+        <h2>{{T:live.last_heard}}</h2>
+        <div id="last-list"><div class="empty">{{T:live.no_calls}}</div></div>
     </div>
 
     <div class="foot">
-        <a href="/">Home</a> · <a href="/map">Map</a> · <a href="/ui">Dashboard</a>
+        <a href="/">{{T:common.home}}</a> · <a href="/map">{{T:common.map}}</a> · <a href="/ui">{{T:common.dashboard}}</a>
     </div>
 </div>
 
@@ -181,17 +195,30 @@ function fmtDuration(ms) {
     if (s < 60) return s + 's';
     return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
 }
+const I18N = {
+    just_now: '{{T:live.just_now}}',
+    ago_s:    '{{T:live.ago_s}}',
+    ago_min:  '{{T:live.ago_min}}',
+    ago_h:    '{{T:live.ago_h}}',
+    ago_d:    '{{T:live.ago_d}}',
+    tg_local: '{{T:live.tg_local}}',
+    tg_tetra: '{{T:live.tg_tetra}}',
+    tg_dmr:   '{{T:live.tg_dmr}}',
+    silent:   '{{T:live.silent}}',
+    no_calls: '{{T:live.no_calls}}',
+    lang:     '{{LANG_HTML_ATTR}}',
+};
 function fmtAgo(iso) {
     const then = new Date(iso).getTime();
     const now = Date.now();
     const s = Math.floor((now - then) / 1000);
-    if (s < 5) return 'gerade eben';
-    if (s < 60) return 'vor ' + s + 's';
+    if (s < 5) return I18N.just_now;
+    if (s < 60) return I18N.ago_s.replace('%d', s);
     const m = Math.floor(s / 60);
-    if (m < 60) return 'vor ' + m + 'min';
+    if (m < 60) return I18N.ago_min.replace('%d', m);
     const h = Math.floor(m / 60);
-    if (h < 24) return 'vor ' + h + 'h';
-    return 'vor ' + Math.floor(h / 24) + 'd';
+    if (h < 24) return I18N.ago_h.replace('%d', h);
+    return I18N.ago_d.replace('%d', Math.floor(h / 24));
 }
 function networkClass(gssi) {
     if (gssi >= 91) return 'dmr';
@@ -199,9 +226,9 @@ function networkClass(gssi) {
     return 'local';
 }
 function networkLabel(gssi) {
-    if (gssi >= 91) return 'DMR';
-    if (gssi >= 10) return 'TETRA';
-    return 'LOKAL';
+    if (gssi >= 91) return I18N.tg_dmr;
+    if (gssi >= 10) return I18N.tg_tetra;
+    return I18N.tg_local;
 }
 function renderRow(e, live) {
     const cs = e.callsign ? e.callsign : '';
@@ -229,11 +256,11 @@ async function update() {
         document.getElementById('active-count').textContent = active.length;
         document.getElementById('active-list').innerHTML = active.length
             ? active.map(e => renderRow(e, true)).join('')
-            : '<div class="empty">Stille auf der Frequenz.</div>';
+            : '<div class="empty">' + I18N.silent + '</div>';
         document.getElementById('last-list').innerHTML = past.length
             ? past.map(e => renderRow(e, false)).join('')
-            : '<div class="empty">Noch keine Calls aufgezeichnet.</div>';
-        document.getElementById('last-update').textContent = new Date().toLocaleTimeString('de-DE');
+            : '<div class="empty">' + I18N.no_calls + '</div>';
+        document.getElementById('last-update').textContent = new Date().toLocaleTimeString(I18N.lang === 'en' ? 'en-US' : 'de-DE');
     } catch (e) {
         document.getElementById('last-update').textContent = 'offline';
     }

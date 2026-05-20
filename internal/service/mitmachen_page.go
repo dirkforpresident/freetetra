@@ -16,22 +16,24 @@ func (s *Service) handleMitmachenPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(s.renderMitmachenPage(r.Host)))
+	w.Write([]byte(s.renderMitmachenPage(r.Host, detectLang(r))))
 }
 
-func (s *Service) renderMitmachenPage(host string) string {
-	rpl := strings.NewReplacer(
+func (s *Service) renderMitmachenPage(host string, lang Lang) string {
+	out := translate(mitmachenHTML, lang)
+	return strings.NewReplacer(
 		"{{HOST}}", html.EscapeString(host),
-	)
-	return rpl.Replace(mitmachenHTML)
+		"{{LANG_HTML_ATTR}}", string(lang),
+		"{{LANG_SWITCH}}", langSwitchHTML(lang),
+	).Replace(out)
 }
 
 const mitmachenHTML = `<!DOCTYPE html>
-<html lang="de">
+<html lang="{{LANG_HTML_ATTR}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mitmachen — FreeTetra</title>
+<title>{{T:join.title}} — FreeTetra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -90,6 +92,10 @@ pre {
 
 .footer { text-align: center; padding: 32px 0; color: var(--text-muted); font-size: 0.8rem; }
 .footer a { color: var(--accent); text-decoration: none; margin: 0 8px; }
+.lang-toggle { position: absolute; top: 16px; right: 20px; font-size: 0.78rem; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); }
+.lang-link { color: var(--text-muted); text-decoration: none; padding: 2px 6px; border-radius: 4px; }
+.lang-link:hover { color: var(--accent); }
+.lang-link.lang-active { color: var(--accent); font-weight: 700; }
 
 @media (max-width: 640px) {
     .container { padding: 0 16px; }
@@ -101,106 +107,104 @@ pre {
 </style>
 </head>
 <body>
+<div class="lang-toggle">{{LANG_SWITCH}}</div>
 <div class="container">
     <div class="hero">
-        <a href="/">&larr; Start</a>
-        <h1>Mit<span>machen</span></h1>
-        <div class="tagline">FreeTetra ist offen — jeder lizenzierte Funkamateur kann mitmachen. So gehts.</div>
+        <a href="/">{{T:common.back_to_start}}</a>
+        <h1>{{T:join.title}}</h1>
+        <div class="tagline">{{T:join.tagline}}</div>
     </div>
 
     <div class="card">
-        <h2>Zwei Wege</h2>
+        <h2>{{T:join.two_ways.title}}</h2>
         <div class="path">
             <div class="path-icon">📡</div>
             <div>
-                <div class="path-name">Als User mit eigenem Hotspot</div>
-                <div class="path-desc">Eine kleine BlueStation zu Hause, fuer dich + dein Funkgeraet. Haeufigster Fall.</div>
+                <div class="path-name">{{T:join.path_hotspot}}</div>
+                <div class="path-desc">{{T:join.path_hotspot.desc}}</div>
             </div>
         </div>
         <div class="path">
             <div class="path-icon">🌐</div>
             <div>
-                <div class="path-name">Als Server-Operator</div>
-                <div class="path-desc">Eigenen FreeTetra-Server fuer einen lokalen Cluster (OV, Verein, Gruppe).</div>
+                <div class="path-name">{{T:join.path_server}}</div>
+                <div class="path-desc">{{T:join.path_server.desc}}</div>
             </div>
         </div>
     </div>
 
     <div class="card">
-        <h2>Pfad 1: Hotspot mit BlueStation</h2>
-        <p>Der einfachste Einstieg. Du brauchst keinen eigenen Server — nur eine BlueStation die sich mit <code>freetetra.de</code> verbindet.</p>
+        <h2>{{T:join.path1.title}}</h2>
+        <p>{{T:join.path1.intro}}</p>
 
-        <h3>Hardware</h3>
+        <h3>{{T:join.path1.hardware_h}}</h3>
         <ul>
-            <li><strong>Raspberry Pi</strong> (3B+ oder neuer)</li>
-            <li><strong>SX1255-Funkboard</strong> als RPi-HAT — es gibt mehrere offene Designs (TetroPi, SXceiver von OH2EAT, weitere in der Community)</li>
-            <li><strong>UHF-Antenne</strong> (fuer Hotspot reicht eine kleine Stub-Antenne)</li>
-            <li>SD-Karte, Stromversorgung, ggf. Gehaeuse</li>
+            <li>{{T:join.path1.hw_pi}}</li>
+            <li>{{T:join.path1.hw_sx}}</li>
+            <li>{{T:join.path1.hw_ant}}</li>
+            <li>{{T:join.path1.hw_misc}}</li>
         </ul>
-        <p style="font-size:0.88rem">Boards bekommt man entweder fix und fertig <strong>in der BlueStation-Telegram-Gruppe</strong> (dort handeln OMs gebrauchte und neue) oder man laesst sich die offenen Designs bei <strong>JLCPCB</strong> selbst fertigen.</p>
+        <p style="font-size:0.88rem">{{T:join.path1.boards}}</p>
 
-        <h3>Software</h3>
-        <p><strong>BlueStation</strong> von <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">MidnightBlueLabs</a> (Apache 2.0). Ein Hotspot-User braucht <strong>nichts extra</strong> — kein Fork, kein Build-System-Magic. Pre-Built Binaries oder selbst kompilieren wie im README beschrieben.</p>
+        <h3>{{T:join.path1.sw_h}}</h3>
+        <p>{{T:join.path1.sw_body}}</p>
 
-        <h3>Account: RadioID</h3>
-        <p>Du brauchst eine <a href="https://radioid.net">RadioID</a> (= DMR-ID). Wenn du noch keine hast: dort registrieren mit deinem Funkamateur-Rufzeichen. Dauert 1-2 Tage. Deine ISSI fuer TETRA ist die <code>RadioID + 2 Stellen SSID</code> (z.B. <code>2623563</code> + <code>00</code> = <code>262356300</code>).</p>
+        <h3>{{T:join.path1.acct_h}}</h3>
+        <p>{{T:join.path1.acct_body}}</p>
 
-        <h3>Config — Brew-Host eintragen</h3>
-        <p>Das ist die einzige FreeTetra-spezifische Section in deiner <code>config.toml</code>:</p>
+        <h3>{{T:join.path1.cfg_h}}</h3>
+        <p>{{T:join.path1.cfg_intro}}</p>
         <pre>[brew]
 host = "freetetra.de"
 port = 443
 tls = true
-username = DEINE_ISSI         # z.B. 262356300
-password = "blafablafa"       # Shared Key fuer alle RadioID-User</pre>
-        <p>Der Rest der BlueStation-Config (SDR-Frequenzen, <code>[net_info]</code> mit MCC/MNC entsprechend deinem Funkgeraet, <code>[cell_info]</code> etc.) ist BlueStation-User-Setup und in der BlueStation-Doku beschrieben.</p>
-        <p>Beim Start meldet sich dein Funkgeraet automatisch an — keine Account-Registrierung noetig, RadioID wird gegen radioid.net verifiziert.</p>
+username = DEINE_ISSI         # {{T:join.path1.cfg_comment_issi}}
+password = "blafablafa"       # {{T:join.path1.cfg_comment_pw}}</pre>
+        <p>{{T:join.path1.cfg_rest}}</p>
+        <p>{{T:join.path1.cfg_autoauth}}</p>
     </div>
 
     <div class="card">
-        <h2>Hilfe zur BlueStation-Hardware/-Software</h2>
-        <p>Es gibt eine aktive <strong>BlueStation-Telegram-Gruppe</strong> in der OMs Boards anbieten, Probleme diskutieren und Setup-Fragen beantworten. Den Einladungslink findest du im MidnightBlueLabs-Repo bzw. ueber die Community.</p>
-        <p>Fuer FreeTetra-spezifische Fragen (Server-Connect, TG-Schema): siehe Kontakt unten.</p>
+        <h2>{{T:join.help.title}}</h2>
+        <p>{{T:join.help.body1}}</p>
+        <p>{{T:join.help.body2}}</p>
     </div>
 
     <div class="card">
-        <h2>Talkgroups</h2>
-        <pre>TG 1-9      Lokal (nur dein Server, nie foederiert)
-            -> Echo bei TG 9
-
-TG 10-90    FreeTetra global (alle FreeTetra-Server)
-
-TG 91+      BrandMeister-Kompatibilitaet (DMR-Bridge)
+        <h2>{{T:join.tgs.title}}</h2>
+        <pre>TG 1-9      {{T:landing.tgs.local.name}}
+TG 10-90    {{T:landing.tgs.global.name}}
+TG 91+      {{T:landing.tgs.bm.name}}
             -> TG 262   = DL
             -> TG 2621  = DL Cluster Nord
-            -> TG 1     = Welt</pre>
-        <p>Mehr Details auf der <a href="/">Startseite</a>.</p>
+            -> TG 1     = World</pre>
+        <p>{{T:join.tgs.more}}</p>
     </div>
 
     <div class="card">
-        <h2>Pfad 2: Eigener Server</h2>
-        <p>Wenn deine Gruppe (OV, Verein, Funkrunde) einen eigenen lokalen Cluster will: du betreibst einen FreeTetra-Server, deine BlueStations connecten dort, ihr peert mit <code>freetetra.de</code> und anderen FreeTetra-Servern.</p>
-        <p>Was du brauchst:</p>
+        <h2>{{T:join.path2.title}}</h2>
+        <p>{{T:join.path2.intro}}</p>
+        <p>{{T:join.path2.need}}</p>
         <ul>
-            <li>Linux-VM oder kleiner Server (1 vCPU, 512 MB RAM reicht)</li>
-            <li>Domain mit SSL</li>
-            <li>FreeTetra-Server-Software (Go-Binary; Repo wird oeffentlich sobald stabil)</li>
+            <li>{{T:join.path2.need_vm}}</li>
+            <li>{{T:join.path2.need_dom}}</li>
+            <li>{{T:join.path2.need_sw}}</li>
         </ul>
 
-        <h3>Federation</h3>
-        <p>Federation laeuft ueber einen <strong>symmetrischen Shared Key</strong>. Damit ein neuer Server am offenen FreeTetra-Netz peeren kann, nutzt er einfach:</p>
+        <h3>{{T:join.path2.fed_h}}</h3>
+        <p>{{T:join.path2.fed_body}}</p>
         <pre>FEDERATION_KEY=freetetra-federation-2026
 FEDERATION_PEERS=wss://freetetra.de/peer/</pre>
-        <p style="font-size:0.88rem">Der Key ist <strong>bewusst oeffentlich</strong> — FreeTetra ist offen, jeder darf mitmachen. Wer ein <strong>privates Mesh</strong> aufbauen will (z.B. nur fuer den eigenen Verein, ohne Verbindung zum oeffentlichen Netz), waehlt einfach einen eigenen <code>FEDERATION_KEY</code> und tauscht den nur mit den eigenen Peers aus.</p>
+        <p style="font-size:0.88rem">{{T:join.path2.fed_note}}</p>
     </div>
 
     <div class="card">
-        <h2>Kontakt</h2>
-        <p>FreeTetra ist im Aufbau. Fuer Fragen, Mitmachen, oder Setup-Hilfe: <a href="mailto:do1xx@pm.me">do1xx@pm.me</a></p>
+        <h2>{{T:join.contact.title}}</h2>
+        <p>{{T:join.contact.body}}</p>
     </div>
 
     <div class="footer">
-        <a href="/">Start</a> · <a href="/live">Live</a> · <a href="/map">Map</a>
+        <a href="/">{{T:common.home}}</a> · <a href="/live">{{T:common.live}}</a> · <a href="/map">{{T:common.map}}</a>
     </div>
 </div>
 </body>

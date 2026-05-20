@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -312,15 +313,23 @@ func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleMapPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(coverageMapHTML))
+	w.Write([]byte(s.renderMapPage(detectLang(r))))
+}
+
+func (s *Service) renderMapPage(lang Lang) string {
+	out := translate(coverageMapHTML, lang)
+	return strings.NewReplacer(
+		"{{LANG_HTML_ATTR}}", string(lang),
+		"{{LANG_SWITCH}}", langSwitchHTML(lang),
+	).Replace(out)
 }
 
 const coverageMapHTML = `<!DOCTYPE html>
-<html lang="de">
+<html lang="{{LANG_HTML_ATTR}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FreeTetra Map</title>
+<title>{{T:map.title}}</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
@@ -396,6 +405,11 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 .filter-btn:hover { background: rgba(5,150,105,0.1); }
 .filter-btn.active { background: #059669; color: white; border-color: #059669; }
 
+.lang-toggle-inline { display: inline-flex; gap: 4px; align-items: center; margin-left: 8px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; }
+.lang-link { color: inherit; text-decoration: none; opacity: 0.6; padding: 2px 4px; }
+.lang-link:hover { opacity: 1; }
+.lang-link.lang-active { opacity: 1; font-weight: 700; color: #059669; }
+
 .legend {
     padding: 10px 14px;
     border-radius: 8px;
@@ -438,16 +452,17 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 <div class="header">
     <h1>Free<span>Tetra</span> Map</h1>
     <div class="info">
-        <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-repeaters">0/0</b> Repeater</span>
-        <span><b id="stat-devices">0</b> Geräte</span>
-        <span class="filter-group" title="Zeitraum der gezeigten Samples">
+        <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-repeaters">0/0</b> {{T:map.repeater}}</span>
+        <span><b id="stat-devices">0</b> {{T:map.devices}}</span>
+        <span class="filter-group" title="{{T:map.filter_title}}">
             <button class="filter-btn" data-days="7">7d</button>
             <button class="filter-btn" data-days="30">30d</button>
             <button class="filter-btn active" data-days="90">90d</button>
-            <button class="filter-btn" data-days="0">Alles</button>
+            <button class="filter-btn" data-days="0">{{T:map.filter_all}}</button>
         </span>
         <button class="theme-btn" onclick="toggleTheme()" id="theme-toggle">🌙 Dark</button>
-        <a href="/">&larr; Start</a>
+        <span class="lang-toggle-inline">{{LANG_SWITCH}}</span>
+        <a href="/">{{T:common.back_to_start}}</a>
     </div>
 </div>
 
@@ -566,13 +581,26 @@ if (savedTheme === "dark") applyTheme("dark");
 const HEX_COLOR = "#10b981"; // FreeTetra accent green
 const ONLINE_WINDOW_S = 15 * 60; // sample newer than 15 min ⇒ "online"
 
+const I18N = {
+    online:     '{{T:map.online}}',
+    offline:    '{{T:map.offline}}',
+    samples:    '{{T:map.samples}}',
+    device_one: '{{T:map.device_one}}',
+    device_many:'{{T:map.device_many}}',
+    from:       '{{T:map.from}}',
+    last:       '{{T:map.last}}',
+    ago_s:      '{{T:map.ago_s}}',
+    ago_min:    '{{T:map.ago_min}}',
+    ago_h:      '{{T:map.ago_h}}',
+    ago_d:      '{{T:map.ago_d}}',
+};
 function timeAgo(tsSec) {
     if (!tsSec) return "—";
     const diff = Math.max(0, Math.floor(Date.now() / 1000) - tsSec);
-    if (diff < 60) return "vor " + diff + " s";
-    if (diff < 3600) return "vor " + Math.floor(diff / 60) + " min";
-    if (diff < 86400) return "vor " + Math.floor(diff / 3600) + " h";
-    return "vor " + Math.floor(diff / 86400) + " Tagen";
+    if (diff < 60) return I18N.ago_s.replace('%d', diff);
+    if (diff < 3600) return I18N.ago_min.replace('%d', Math.floor(diff / 60));
+    if (diff < 86400) return I18N.ago_h.replace('%d', Math.floor(diff / 3600));
+    return I18N.ago_d.replace('%d', Math.floor(diff / 86400));
 }
 
 function escapeHexHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -581,14 +609,15 @@ function hexPopup(h) {
     const now = Math.floor(Date.now() / 1000);
     const online = h.t && (now - h.t) < ONLINE_WINDOW_S;
     const dot = online
-        ? '<span style="color:#10b981;font-weight:600">&#9679; ONLINE</span>'
-        : '<span style="color:#9ca3af">&#9675; OFFLINE</span>';
+        ? '<span style="color:#10b981;font-weight:600">&#9679; ' + I18N.online + '</span>'
+        : '<span style="color:#9ca3af">&#9675; ' + I18N.offline + '</span>';
+    const devWord = h.u === 1 ? I18N.device_one : I18N.device_many;
     const rows = [];
-    rows.push("<div style='font-size:13px;font-weight:600;color:#059669'>" + h.n + " Samples &middot; " + h.u + (h.u === 1 ? " Gerät" : " Geräte") + "</div>");
+    rows.push("<div style='font-size:13px;font-weight:600;color:#059669'>" + h.n + " " + I18N.samples + " &middot; " + h.u + " " + devWord + "</div>");
     if (h.rp && h.rp.length) {
-        rows.push("<div style='font-size:12px;margin-top:4px'>Von: " + h.rp.map(escapeHexHtml).join(", ") + "</div>");
+        rows.push("<div style='font-size:12px;margin-top:4px'>" + I18N.from + ": " + h.rp.map(escapeHexHtml).join(", ") + "</div>");
     }
-    rows.push("<div style='font-size:12px;color:#6b7280;margin-top:4px'>Letzte: " + timeAgo(h.t) + "</div>");
+    rows.push("<div style='font-size:12px;color:#6b7280;margin-top:4px'>" + I18N.last + ": " + timeAgo(h.t) + "</div>");
     rows.push("<div style='margin-top:6px'>" + dot + "</div>");
     return rows.join("");
 }

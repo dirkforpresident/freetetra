@@ -239,60 +239,60 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 <div class="stats">
     <div class="stat">
         <div class="stat-value" id="s-repeaters">-</div>
-        <div class="stat-label">Repeater</div>
+        <div class="stat-label">{{T:admin.repeater}}</div>
     </div>
     <div class="stat">
         <div class="stat-value" id="s-subscribers">-</div>
-        <div class="stat-label">Subscriber</div>
+        <div class="stat-label">{{T:admin.subscriber}}</div>
     </div>
     <div class="stat">
         <div class="stat-value" id="s-peers">-</div>
-        <div class="stat-label">Peers</div>
+        <div class="stat-label">{{T:admin.peers}}</div>
     </div>
     <div class="stat">
         <div class="stat-value" id="s-positions">-</div>
-        <div class="stat-label">Positionen</div>
+        <div class="stat-label">{{T:admin.positions}}</div>
     </div>
 </div>
 
 <div class="card">
-    <h2>Repeater <span class="count" id="repeater-count">0</span></h2>
+    <h2>{{T:admin.repeater}} <span class="count" id="repeater-count">0</span></h2>
     <div class="table-wrap"><table>
-        <thead><tr><th>Name</th><th>Subscriber</th><th>IP</th><th>Letzte Aktivitaet</th></tr></thead>
+        <thead><tr><th>{{T:admin.col.name}}</th><th>{{T:admin.subscriber}}</th><th>{{T:admin.col.ip}}</th><th>{{T:admin.col.last_act}}</th></tr></thead>
         <tbody id="repeaters-body"></tbody>
     </table></div>
-    <div id="repeaters-empty" class="empty">Keine Repeater verbunden</div>
+    <div id="repeaters-empty" class="empty">{{T:admin.empty.repeaters}}</div>
 </div>
 
 <div class="card">
-    <h2>Subscribers <span class="count" id="subs-count">0</span></h2>
+    <h2>{{T:admin.subscriber}} <span class="count" id="subs-count">0</span></h2>
     <div class="table-wrap"><table>
-        <thead><tr><th>ISSI</th><th>Rufzeichen</th><th>Repeater</th></tr></thead>
+        <thead><tr><th>{{T:admin.col.issi}}</th><th>{{T:admin.col.callsign}}</th><th>{{T:admin.repeater}}</th></tr></thead>
         <tbody id="subs-body"></tbody>
     </table></div>
-    <div id="subs-empty" class="empty">Niemand eingebucht</div>
+    <div id="subs-empty" class="empty">{{T:admin.empty.subs}}</div>
 </div>
 
 <div class="card">
-    <h2>Peers <span class="count" id="peers-count">0</span></h2>
+    <h2>{{T:admin.peers}} <span class="count" id="peers-count">0</span></h2>
     <div class="table-wrap"><table>
-        <thead><tr><th>Server</th><th>Richtung</th><th>Remote Subscribers</th></tr></thead>
+        <thead><tr><th>{{T:admin.col.server}}</th><th>{{T:admin.col.direction}}</th><th>{{T:admin.col.remote_subs}}</th></tr></thead>
         <tbody id="peers-body"></tbody>
     </table></div>
-    <div id="peers-empty" class="empty">Keine Peers verbunden</div>
+    <div id="peers-empty" class="empty">{{T:admin.empty.peers}}</div>
 </div>
 
 <div class="card">
-    <h2>Letzte Positionen <span class="count" id="pos-count">0</span></h2>
+    <h2>{{T:admin.h.last_positions}} <span class="count" id="pos-count">0</span></h2>
     <div class="table-wrap"><table>
-        <thead><tr><th>ISSI</th><th>Latitude</th><th>Longitude</th><th>Zeit</th></tr></thead>
+        <thead><tr><th>{{T:admin.col.issi}}</th><th>{{T:admin.col.lat}}</th><th>{{T:admin.col.lon}}</th><th>{{T:admin.col.time}}</th></tr></thead>
         <tbody id="positions-body"></tbody>
     </table></div>
-    <div id="positions-empty" class="empty">Keine Positionen empfangen</div>
+    <div id="positions-empty" class="empty">{{T:admin.empty.positions}}</div>
 </div>
 
 <div class="card">
-    <h2>Aktivitaet <span class="live"></span></h2>
+    <h2>{{T:admin.h.activity}} <span class="live"></span></h2>
     <div class="activity" id="activity"></div>
 </div>
 
@@ -420,7 +420,7 @@ async function updateActivity() {
         const activity = (d.activity || []).slice(-30).reverse();
         const el = document.getElementById("activity");
         if (activity.length === 0) {
-            el.innerHTML = "<div class=\"empty\">Keine Aktivitaet</div>";
+            el.innerHTML = "<div class=\"empty\">{{T:admin.empty.activity}}</div>";
             return;
         }
         el.innerHTML = activity.map(a =>
@@ -451,7 +451,13 @@ func (s *Service) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	if serverName == "" {
 		serverName = "FreeTetra"
 	}
-	html := strings.ReplaceAll(freetetraAdminHTML, "{{SERVER_NAME}}", serverName)
+	lang := detectLang(r)
+	html := translate(freetetraAdminHTML, lang)
+	html = strings.NewReplacer(
+		"{{SERVER_NAME}}", serverName,
+		"{{LANG_HTML_ATTR}}", string(lang),
+		"{{LANG_SWITCH}}", langSwitchHTML(lang),
+	).Replace(html)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
 }
