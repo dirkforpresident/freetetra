@@ -344,6 +344,27 @@ body {
     </div>
 
     <div class="card">
+        <h2>Was los ist im Netz</h2>
+        <p>Live mitschauen wer am Funken ist und wo Coverage besteht:</p>
+        <div class="services" style="margin-top:12px">
+            <a href="/map" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
+                <div class="svc-tg">/map</div>
+                <div>
+                    <div class="svc-name">Coverage-Map</div>
+                    <div class="svc-desc">Wo Funkgeraete erfolgreich gesehen werden — automatisch aus LIP-Positions aufgebaut, in H3-Hexagons aggregiert (Street/City/Region je nach Zoom).</div>
+                </div>
+            </a>
+            <a href="/ui" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
+                <div class="svc-tg">/ui</div>
+                <div>
+                    <div class="svc-name">Dashboard</div>
+                    <div class="svc-desc">Live-Uebersicht: verbundene Repeater, eingebuchte Subscriber, aktive Calls, Federation-Peers.</div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <div class="card">
         <h2>Talkgroups (GSSI-Schema)</h2>
         <div class="services">
             <div class="svc">
