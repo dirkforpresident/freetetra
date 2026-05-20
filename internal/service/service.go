@@ -54,6 +54,7 @@ type Service struct {
 	telemetry     *TelemetryServer
 	coverageDB    *CoverageDB
 	stationStore  *stationStore
+	lastHeard     *LastHeardBuffer
 }
 
 type activeCall struct {
@@ -103,6 +104,7 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	} else {
 		logger.Printf("CoverageDB: failed to open: %v (map will use in-memory only)", err)
 	}
+	s.lastHeard = newLastHeardBuffer(100)
 	s.rateLimiter = newAuthRateLimiter()
 	s.server = brew.NewServer(cfg, logger, s)
 
@@ -164,6 +166,7 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	s.registerRepeaterHandlers()
 	s.registerTelemetryServer()
 	s.registerStationHandlers()
+	s.registerLiveHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {
@@ -236,6 +239,11 @@ func (s *Service) OnDisconnect(client *brew.Client) {
 		}
 	}
 	s.callMu.Unlock()
+	if s.lastHeard != nil {
+		for _, call := range toRelease {
+			s.lastHeard.End(call.ID)
+		}
+	}
 
 	for _, call := range toRelease {
 		release := brew.BuildCallRelease(call.ID, s.cfg.Netstack.ReleaseCause)
@@ -389,6 +397,9 @@ func (s *Service) onCallControlFromClient(client *brew.Client, m *brew.CallContr
 			OriginClientID:  trackOrigin,
 		}
 		s.callMu.Unlock()
+		if s.lastHeard != nil {
+			s.lastHeard.Start(m.Identifier, trackSource, trackDest, "subscriber")
+		}
 	}
 
 	if s.maybeHandleVirtualCircuitCallControl(client, m, source, dest) {
@@ -441,6 +452,9 @@ func (s *Service) onCallControlFromClient(client *brew.Client, m *brew.CallContr
 		delete(s.calls, m.Identifier)
 		delete(s.virtualCircuitCalls, m.Identifier)
 		s.callMu.Unlock()
+		if s.lastHeard != nil {
+			s.lastHeard.End(m.Identifier)
+		}
 	}
 }
 
@@ -1132,6 +1146,9 @@ func (s *Service) StartInjectedGroupTX(
 		OriginClientID:  origin,
 	}
 	s.callMu.Unlock()
+	if s.lastHeard != nil {
+		s.lastHeard.Start(callID, sourceISSI, destinationGSI, "injected:"+origin)
+	}
 
 	wire := brew.BuildGroupTXWithAccess(callID, sourceISSI, destinationGSI, priority, access, service)
 	recipients := s.server.BroadcastToGroup(destinationGSI, wire, "")
@@ -1139,6 +1156,9 @@ func (s *Service) StartInjectedGroupTX(
 		s.callMu.Lock()
 		delete(s.calls, callID)
 		s.callMu.Unlock()
+		if s.lastHeard != nil {
+			s.lastHeard.End(callID)
+		}
 		s.logger.Printf(
 			"%s group-tx ignored call=%s source=%d tg=%d recipients=0",
 			origin,
@@ -1183,6 +1203,9 @@ func (s *Service) ReleaseInjectedCall(origin string, callID uuid.UUID, cause uin
 	call = s.calls[callID]
 	delete(s.calls, callID)
 	s.callMu.Unlock()
+	if s.lastHeard != nil {
+		s.lastHeard.End(callID)
+	}
 	if call == nil {
 		return
 	}
