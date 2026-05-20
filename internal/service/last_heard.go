@@ -47,10 +47,10 @@ func isServiceISSI(issi uint32) bool {
 }
 
 // ignoredLastHeardGSSIs sind Talkgroups die nicht im Last-Heard auftauchen
-// sollen — typischerweise Status/LIP-Pseudo-Calls von Funkgeraeten die
-// Position-Updates via Circuit Mode senden (statt SDS).
+// sollen — typischerweise Status/Position-Reporting-GSSIs die in TETRA-
+// Funkgeraeten hart konfiguriert sind und keinen echten Sprachfunk darstellen.
 var ignoredLastHeardGSSIs = map[uint32]struct{}{
-	262999: {}, // DO1XX/andere: TETRA-Funkgeraet LIP-Status-Updates
+	262999: {}, // APRS-Reporting-GSSI (in vielen TETRA-Funkgeraeten Standard)
 }
 
 func isIgnoredGSSI(gssi uint32) bool {
