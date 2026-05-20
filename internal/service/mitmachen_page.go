@@ -144,7 +144,7 @@ pre {
             <li><strong>UHF-Antenne</strong> (fuer Hotspot reicht eine kleine Stub-Antenne)</li>
             <li>SD-Karte, Stromversorgung, ggf. Gehaeuse</li>
         </ul>
-        <p style="font-size:0.88rem">Boards bekommt man entweder fix und fertig <strong>in der BlueStation-Telegram-Gruppe</strong> (dort handeln Bastler gebrauchte und neue) oder man laesst sich die offenen Designs bei <strong>JLCPCB</strong> selbst fertigen.</p>
+        <p style="font-size:0.88rem">Boards bekommt man entweder fix und fertig <strong>in der BlueStation-Telegram-Gruppe</strong> (dort handeln OMs gebrauchte und neue) oder man laesst sich die offenen Designs bei <strong>JLCPCB</strong> selbst fertigen.</p>
 
         <h3>Software</h3>
         <p><strong>BlueStation</strong> von <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">MidnightBlueLabs</a> (Apache 2.0). Ein Hotspot-User braucht <strong>nichts extra</strong> — kein Fork, kein Build-System-Magic. Pre-Built Binaries oder selbst kompilieren wie im README beschrieben.</p>
@@ -169,7 +169,7 @@ mnc = 8888</pre>
 
     <div class="card">
         <h2>Hilfe zur BlueStation-Hardware/-Software</h2>
-        <p>Es gibt eine aktive <strong>BlueStation-Telegram-Gruppe</strong> in der Bastler, Boards anbieten, Probleme diskutieren und Setup-Fragen beantworten. Den Einladungslink findest du im MidnightBlueLabs-Repo bzw. ueber die Community.</p>
+        <p>Es gibt eine aktive <strong>BlueStation-Telegram-Gruppe</strong> in der OMs Boards anbieten, Probleme diskutieren und Setup-Fragen beantworten. Den Einladungslink findest du im MidnightBlueLabs-Repo bzw. ueber die Community.</p>
         <p>Fuer FreeTetra-spezifische Fragen (Server-Connect, TG-Schema): siehe Kontakt unten.</p>
     </div>
 
