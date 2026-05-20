@@ -336,19 +336,52 @@ body {
 
     <div class="card">
         <h2>Was ist FreeTetra?</h2>
-        <p>FreeTetra ist ein offenes TETRA-Funknetz fuer Amateurfunk. Jeder kann mitmachen —
-           entweder ueber einen bestehenden Server oder mit einem eigenen.</p>
-        <p>Das Netz ist <strong>foederiert</strong>: Mehrere unabhaengige Server sind untereinander
-           verbunden, wie bei E-Mail. Egal bei welchem Server du bist — du erreichst alle.
-           Kein zentraler Betreiber, kein Machthaber.</p>
+        <p>Foederierter TETRA-Brew-Server fuer Amateurfunk. Mehrere unabhaengige Server peeren ueber das Brew-Protokoll (binary WebSocket) — wie SMTP zwischen Mailservern. Subscriber (ISSI) sind serverlokal, ausgewaehlte Talkgroups (GSSI) werden zwischen Servern geroutet. Authentifizierung ueber RadioID, keine zentrale Registrierung.</p>
 
         <div class="federation-info">
-            Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation) und dem <code>Brew</code>-Protokoll.
-            Offener Code (GPLv3) — jeder kann pruefen, aendern, mitmachen.
+            Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation) und dem <code>Brew</code>-Protokoll. Code GPLv3 — du kannst lesen, forken, selber hosten.
         </div>
     </div>
 
     <div class="card">
+        <h2>Warum gerade im Amateurfunk wichtig</h2>
+        <p>Amateurfunk ist per Definition nicht-kommerziell, experimentell, selbsterklaerend. Du musst verstehen koennen was du sendest — das ist Lizenzpflicht (§ 5 AFuG).</p>
+        <p>Aktuell laeuft TMO bei den Funkamateuren ueber BrandMeister oder tmo.services: zentrale Server unter Kontrolle weniger Personen, Closed Backend, du siehst nicht was mit deinem Verkehr passiert. Wer dem Admin nicht passt, fliegt — ohne Berufung. Wird der Server abgeschaltet, ist die Community offline. Das passt nicht zum Amateurfunk.</p>
+        <p>FreeTetra dreht das um: wie E-Mail. Jeder Operator betreibt seinen eigenen Server, alle peeren miteinander. Keine Erlaubnis noetig fuer einen eigenen Server. Wenn <code>freetetra.de</code> morgen weg ist, laufen die Server in Winsen, Hamburg, sonstwo weiter — deine Cell ist nicht offline. Im Notfunk-Szenario (Internet-Backbone tot) peeren lokale Server ueber LAN/Tunnel, lokale Kommunikation laeuft weiter. Volle Kontrolle ueber deine Subscriber, deine Logs, deine Routing-Regeln.</p>
+    </div>
+
+    <div class="card">
+        <h2>Talkgroups (GSSI-Schema)</h2>
+        <div class="services">
+            <div class="svc">
+                <div class="svc-tg">TG 1-9</div>
+                <div>
+                    <div class="svc-name">Lokal</div>
+                    <div class="svc-desc">Nur deine Cell, geht nie ueber den Funkbereich hinaus.</div>
+                </div>
+            </div>
+            <div class="svc">
+                <div class="svc-tg">TG 10-90</div>
+                <div>
+                    <div class="svc-name">FreeTetra global</div>
+                    <div class="svc-desc">Alle FreeTetra-Server weltweit, ueber Brew-Federation.</div>
+                </div>
+            </div>
+            <div class="svc">
+                <div class="svc-tg">TG 91+</div>
+                <div>
+                    <div class="svc-name">BrandMeister-Bruecke</div>
+                    <div class="svc-desc">Wie 10-90 + DMR-Bruecke zu BrandMeister. TG-Nummern 1:1 (z.B. TG 262 = DL, TG 2621 = DL Cluster Nord).</div>
+                </div>
+            </div>
+        </div>
+        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">Aktuell aktive Services: <strong>TG 23</strong> Webradio SomaFM DEF CON · <strong>TG 24</strong> Webradio DLF · <strong>TG 25</strong> Echo/Papagei</p>
+    </div>
+
+    <div class="card">
+        <h2>Stand: Erprobung</h2>
+        <p>Aktuell zwei BlueStations im Testbetrieb — Schrottplatz Seevetal (<strong>DO0RAM</strong>) und Winsen/L. (<strong>DB0WL</strong>, DL7TJ). Brew-Protokoll, Federation, RadioID-Auth, LIP→APRS, DMR-Bridge zu BrandMeister — alles laeuft.</p>
+        <p>Code wird auf <code>github.com/dirkforpresident/freetetra</code> veroeffentlicht sobald wir den Stand stabil finden. Bis dahin: eigene BlueStation? → Brew-Host eintragen (siehe unten). Eigenen Server? → melde dich.</p>
     </div>
 
     <div class="card">

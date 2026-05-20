@@ -36,17 +36,20 @@ type CallHandler interface {
 }
 
 // FreeTetra GSSI Schema:
-//   1-4:   Local (voice only, not forwarded)
-//   5-90:  FreeTetra (shared between all servers)
-//   91+:   Reserved (future DMR bridge)
+//   1-9:    Local — only this cell, never forwarded between servers
+//   10-90:  FreeTetra global — shared between all FreeTetra servers
+//   91+:    BrandMeister-compatible — shared between FreeTetra servers AND
+//           bridged to DMR/BrandMeister on servers where dmrbridge is configured.
+//           TG numbers map 1:1 (e.g. TG 262 = DL, TG 2621 = DL Cluster Nord).
 const (
-	federationGSSIMin uint32 = 5
-	federationGSSIMax uint32 = 90
+	federationGSSIMin uint32 = 10
 )
 
-// isFederatedGSSI returns true if a GSSI should be shared between servers.
+// isFederatedGSSI returns true if a GSSI should be shared between FreeTetra
+// servers. TG 91+ is also federated; whether it's additionally bridged to
+// BrandMeister depends on per-server dmrbridge config.
 func isFederatedGSSI(gssi uint32) bool {
-	return gssi >= federationGSSIMin && gssi <= federationGSSIMax
+	return gssi >= federationGSSIMin
 }
 
 // Hub manages all federation peer connections.
