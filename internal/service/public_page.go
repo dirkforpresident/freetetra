@@ -397,7 +397,7 @@ body {
                 </div>
             </div>
         </div>
-        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">Aktuell aktive Services: <strong>TG 23</strong> Webradio SomaFM DEF CON · <strong>TG 24</strong> Webradio DLF · <strong>TG 25</strong> Echo/Papagei</p>
+        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">Aktuell aktive Services: <strong>TG 90</strong> Echo/Papagei</p>
     </div>
 
 
