@@ -63,10 +63,10 @@ func (s *Service) handleLandingPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(s.renderLandingPage(r.Host)))
+	w.Write([]byte(s.renderLandingPage(r.Host, detectLang(r))))
 }
 
-func (s *Service) renderLandingPage(host string) string {
+func (s *Service) renderLandingPage(host string, lang Lang) string {
 	serverName := s.cfg.Federation.Name
 	if serverName == "" {
 		serverName = "FreeTetra"
@@ -80,41 +80,46 @@ func (s *Service) renderLandingPage(host string) string {
 	// Server-Info Card (nur wenn mind. eines der Operator-Felder gesetzt)
 	serverInfo := ""
 	if op.Name != "" || op.Contact != "" || op.Description != "" {
+		t := translations[lang]
 		var b strings.Builder
-		b.WriteString(`<div class="card"><h2>Ueber diesen Server</h2>`)
-		b.WriteString(`<p><strong>` + html.EscapeString(host) + `</strong> — Cluster <code>` + html.EscapeString(serverName) + `</code></p>`)
+		b.WriteString(`<div class="card"><h2>` + t["landing.about.title"] + `</h2>`)
+		b.WriteString(`<p><strong>` + html.EscapeString(host) + `</strong> — ` + t["landing.about.cluster"] + ` <code>` + html.EscapeString(serverName) + `</code></p>`)
 		if op.Description != "" {
 			b.WriteString(`<p>` + html.EscapeString(op.Description) + `</p>`)
 		}
 		b.WriteString(`<p style="font-size:0.88rem;color:var(--text-muted)">`)
 		if op.Name != "" {
-			b.WriteString(`Betreiber: <strong>` + html.EscapeString(op.Name) + `</strong>`)
+			b.WriteString(t["landing.about.operator"] + `: <strong>` + html.EscapeString(op.Name) + `</strong>`)
 		}
 		if op.Contact != "" {
 			if op.Name != "" {
 				b.WriteString(` · `)
 			}
-			b.WriteString(`Kontakt: <code>` + html.EscapeString(op.Contact) + `</code>`)
+			b.WriteString(t["landing.about.contact"] + `: <code>` + html.EscapeString(op.Contact) + `</code>`)
 		}
 		b.WriteString(`</p></div>`)
 		serverInfo = b.String()
 	}
 
-	r := strings.NewReplacer(
+	// Translation auf {{T:key}} Platzhalter anwenden, dann dynamische Felder.
+	out := translate(landingPageHTML, lang)
+	rpl := strings.NewReplacer(
 		"{{HOST}}", html.EscapeString(host),
 		"{{SERVER_NAME}}", html.EscapeString(serverName),
 		"{{OPERATOR}}", html.EscapeString(operator),
 		"{{SERVER_INFO_CARD}}", serverInfo,
+		"{{LANG_SWITCH}}", langSwitchHTML(lang),
+		"{{LANG_HTML_ATTR}}", string(lang),
 	)
-	return r.Replace(landingPageHTML)
+	return rpl.Replace(out)
 }
 
 const landingPageHTML = `<!DOCTYPE html>
-<html lang="de">
+<html lang="{{LANG_HTML_ATTR}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FreeTetra — Freies TETRA-Netz</title>
+<title>FreeTetra — {{T:landing.tagline}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -341,6 +346,16 @@ body {
     font-size: 0.8rem;
 }
 
+/* Sprach-Toggle (oben rechts) */
+.lang-toggle {
+    position: absolute; top: 16px; right: 20px;
+    font-size: 0.78rem; font-family: 'JetBrains Mono', monospace;
+    color: var(--text-muted);
+}
+.lang-link { color: var(--text-muted); text-decoration: none; padding: 2px 6px; border-radius: 4px; }
+.lang-link:hover { color: var(--accent); }
+.lang-link.lang-active { color: var(--accent); font-weight: 700; }
+
 /* Mobile */
 @media (max-width: 640px) {
     .container { padding: 0 16px; }
@@ -363,98 +378,100 @@ body {
 </head>
 <body>
 
+<div class="lang-toggle">{{LANG_SWITCH}}</div>
+
 <div class="container">
     <div class="hero">
         <h1>Free<span>Tetra</span></h1>
-        <div class="tagline">Freies, foederiertes TETRA-Netz fuer Amateurfunk</div>
+        <div class="tagline">{{T:landing.tagline}}</div>
     </div>
 
 
     <div class="card">
-        <h2>Was ist FreeTetra?</h2>
-        <p>Freies, foederiertes TETRA-Netz fuer Amateurfunk. Jeder Operator kann einen eigenen Server betreiben — die Server verbinden sich untereinander und teilen ausgewaehlte Talkgroups. Anmeldung mit deiner RadioID, kein zentraler Account.</p>
-        <p><strong>FreeTetra</strong> ist sowohl das Projekt als auch der erste Server: was hier auf <code>{{HOST}}</code> laeuft, kannst du genauso selber hosten und mit anderen FreeTetra-Servern peeren.</p>
+        <h2>{{T:landing.what_is.title}}</h2>
+        <p>{{T:landing.what_is.body1}}</p>
+        <p>{{T:landing.what_is.body2}}</p>
 
         <div class="federation-info">
-            Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation, Apache 2.0).
+            {{T:landing.what_is.based}}
         </div>
     </div>
 
     <div class="card">
-        <h2>Was los ist im Netz</h2>
-        <p>Live mitschauen wer am Funken ist und wo Coverage besteht:</p>
+        <h2>{{T:landing.whats_up.title}}</h2>
+        <p>{{T:landing.whats_up.intro}}</p>
         <div class="services" style="margin-top:12px">
             <a href="/live" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
                 <div class="svc-tg">/live</div>
                 <div>
-                    <div class="svc-name">Last Heard</div>
-                    <div class="svc-desc">Wer hat zuletzt gesprochen — Callsign, ISSI, Talkgroup, Dauer. Live-Update alle 2 Sek.</div>
+                    <div class="svc-name">{{T:landing.whats_up.live.name}}</div>
+                    <div class="svc-desc">{{T:landing.whats_up.live.desc}}</div>
                 </div>
             </a>
             <a href="/map" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
                 <div class="svc-tg">/map</div>
                 <div>
-                    <div class="svc-name">Coverage-Map</div>
-                    <div class="svc-desc">Wo Funkgeraete erfolgreich gesehen werden — automatisch aus LIP-Positions, in H3-Hexagons aggregiert (Street/City/Region je nach Zoom).</div>
+                    <div class="svc-name">{{T:landing.whats_up.map.name}}</div>
+                    <div class="svc-desc">{{T:landing.whats_up.map.desc}}</div>
                 </div>
             </a>
             <a href="/ui" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
                 <div class="svc-tg">/ui</div>
                 <div>
-                    <div class="svc-name">Dashboard</div>
-                    <div class="svc-desc">Volle Uebersicht: Repeater, Subscriber, Federation-Peers, SDS-Console.</div>
+                    <div class="svc-name">{{T:landing.whats_up.ui.name}}</div>
+                    <div class="svc-desc">{{T:landing.whats_up.ui.desc}}</div>
                 </div>
             </a>
         </div>
     </div>
 
     <div class="card">
-        <h2>Talkgroups (GSSI-Schema)</h2>
+        <h2>{{T:landing.tgs.title}}</h2>
         <div class="services">
             <div class="svc">
                 <div class="svc-tg">TG 1-9</div>
                 <div>
-                    <div class="svc-name">Server-lokal</div>
-                    <div class="svc-desc">Bleibt auf diesem Server — wird NICHT zu anderen FreeTetra-Servern foederiert. Innerhalb des Servers an alle verbundenen Cells. Per Konvention: TG 7-9 fuer Service-Bots (Echo, Wetter, etc.) — jeder Server-Operator hostet die eigenen.</div>
+                    <div class="svc-name">{{T:landing.tgs.local.name}}</div>
+                    <div class="svc-desc">{{T:landing.tgs.local.desc}}</div>
                 </div>
             </div>
             <div class="svc">
                 <div class="svc-tg">TG 10-90</div>
                 <div>
-                    <div class="svc-name">FreeTetra global</div>
-                    <div class="svc-desc">Alle FreeTetra-Server weltweit, ueber Brew-Federation.</div>
+                    <div class="svc-name">{{T:landing.tgs.global.name}}</div>
+                    <div class="svc-desc">{{T:landing.tgs.global.desc}}</div>
                 </div>
             </div>
             <div class="svc">
                 <div class="svc-tg">TG 91+</div>
                 <div>
-                    <div class="svc-name">BrandMeister-Bruecke</div>
-                    <div class="svc-desc">Wie 10-90 + DMR-Bruecke zu BrandMeister. TG-Nummern 1:1 (z.B. TG 262 = DL, TG 2621 = DL Cluster Nord).</div>
+                    <div class="svc-name">{{T:landing.tgs.bm.name}}</div>
+                    <div class="svc-desc">{{T:landing.tgs.bm.desc}}</div>
                 </div>
             </div>
         </div>
-        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">Aktuell aktive Services: <strong>TG 9</strong> Echo/Papagei (server-lokal — jeder Server-Operator sollte einen eigenen Echo auf TG 9 betreiben, um Federation-Ping-Pong zu vermeiden).</p>
+        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">{{T:landing.tgs.services}}</p>
     </div>
 
 
     <div class="card">
-        <h2>Server verbinden</h2>
-        <p>BlueStation-Config — einfach den Brew-Host auf diesen Server zeigen:</p>
+        <h2>{{T:landing.connect.title}}</h2>
+        <p>{{T:landing.connect.intro}}</p>
         <pre style="background:var(--bg);padding:16px;border-radius:8px;border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:var(--accent);overflow-x:auto;margin-top:8px">[brew]
 host = "{{HOST}}"
 port = 443
 tls = true
 username = DEINE_DIGITALFUNK_ID
 password = "blafablafa"</pre>
-        <p style="margin-top:12px;font-size:0.82rem">Keine Registrierung noetig! Deine <a href="https://radioid.net" style="color:var(--blue)">Digitalfunk-ID</a> wird automatisch verifiziert. Passwort: <code style="color:var(--accent);font-family:'JetBrains Mono',monospace">blafablafa</code></p>
-        <p style="margin-top:14px"><a href="/mitmachen" style="color:var(--accent);font-weight:600">→ Vollständige Anleitung: Mitmachen mit eigener BlueStation</a></p>
+        <p style="margin-top:12px;font-size:0.82rem">{{T:landing.connect.note}}</p>
+        <p style="margin-top:14px"><a href="/mitmachen" style="color:var(--accent);font-weight:600">{{T:landing.connect.full_doc}}</a></p>
     </div>
 
     {{SERVER_INFO_CARD}}
 
     <div class="footer">
-        <p>FreeTetra — Betrieben von {{OPERATOR}}</p>
-        <p style="margin-top:4px">Powered by <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">BlueStation</a></p>
+        <p>FreeTetra — {{T:common.operated_by}} {{OPERATOR}}</p>
+        <p style="margin-top:4px">{{T:common.powered_by}} <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">BlueStation</a></p>
     </div>
 </div>
 

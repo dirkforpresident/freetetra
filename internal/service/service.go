@@ -168,6 +168,7 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	s.registerStationHandlers()
 	s.registerLiveHandlers()
 	s.registerMitmachenHandlers()
+	s.registerLangHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {
