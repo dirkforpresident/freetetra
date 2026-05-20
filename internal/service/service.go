@@ -1146,9 +1146,10 @@ func (s *Service) StartInjectedGroupTX(
 		OriginClientID:  origin,
 	}
 	s.callMu.Unlock()
-	if s.lastHeard != nil {
-		s.lastHeard.Start(callID, sourceISSI, destinationGSI, "injected:"+origin)
-	}
+	// Bewusst kein lastHeard.Start fuer injected calls — Bots (Webradio, Echo,
+	// SDS-Inject) wuerden den Last-Heard-Feed sonst zuspammen. Echte Subscriber
+	// und ueber den DMR-Bridge-Client reinkommende DMR-Calls landen in dem
+	// "subscriber"-Pfad und werden gezeigt.
 
 	wire := brew.BuildGroupTXWithAccess(callID, sourceISSI, destinationGSI, priority, access, service)
 	recipients := s.server.BroadcastToGroup(destinationGSI, wire, "")
@@ -1203,9 +1204,9 @@ func (s *Service) ReleaseInjectedCall(origin string, callID uuid.UUID, cause uin
 	call = s.calls[callID]
 	delete(s.calls, callID)
 	s.callMu.Unlock()
-	if s.lastHeard != nil {
-		s.lastHeard.End(callID)
-	}
+	// Pendant zu StartInjectedGroupTX: injected calls werden in last-heard nicht
+	// getrackt, daher hier auch kein End-Aufruf noetig (End() ohne vorheriges
+	// Start() ist no-op, aber sauber lassen wir es weg).
 	if call == nil {
 		return
 	}
