@@ -385,7 +385,7 @@ password = "blafablafa"</pre>
     </div>
 
     <div class="footer">
-        <p>FreeTetra — GPLv3 | Betrieben von DO0RAM (DO1XX)</p>
+        <p>FreeTetra — Betrieben von DO0RAM (DO1XX)</p>
         <p style="margin-top:4px">Powered by <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">BlueStation</a></p>
     </div>
 </div>
