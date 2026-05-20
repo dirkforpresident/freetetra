@@ -397,7 +397,7 @@ body {
                 </div>
             </div>
         </div>
-        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">Aktuell aktive Services: <strong>TG 90</strong> Echo/Papagei</p>
+        <p style="margin-top:16px;font-size:0.85rem;color:var(--text-muted)">Aktuell aktive Services: <strong>TG 9</strong> Echo/Papagei (lokal — jeder Server-Operator sollte einen eigenen Echo auf TG 9 betreiben, um Federation-Ping-Pong zu vermeiden).</p>
     </div>
 
 
