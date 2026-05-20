@@ -322,7 +322,7 @@ async function update() {
         document.getElementById("server-name").textContent = publicStatus.server || "FreeTetra";
         document.getElementById("s-repeaters").textContent = publicStatus.repeaters || 0;
         document.getElementById("s-subscribers").textContent = publicStatus.subscribers || 0;
-        document.getElementById("s-peers").textContent = (peers.peers || peers.count || 0);
+        document.getElementById("s-peers").textContent = peers.count || (peers.peers || []).length || 0;
         document.getElementById("s-positions").textContent = publicStatus.positions || 0;
 
         // Repeaters
