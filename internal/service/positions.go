@@ -385,6 +385,17 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
     font-family: inherit;
 }
 
+.filter-group { display: inline-flex; gap: 4px; align-items: center; margin-left: 8px; }
+.filter-btn {
+    background: transparent; border: 1px solid currentColor;
+    color: inherit; padding: 3px 8px; border-radius: 4px;
+    font-size: 0.72rem; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.15s;
+}
+.filter-btn:hover { background: rgba(5,150,105,0.1); }
+.filter-btn.active { background: #059669; color: white; border-color: #059669; }
+
 .legend {
     padding: 10px 14px;
     border-radius: 8px;
@@ -429,6 +440,12 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
     <div class="info">
         <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-repeaters">0/0</b> Repeater</span>
         <span><b id="stat-devices">0</b> Geräte</span>
+        <span class="filter-group" title="Zeitraum der gezeigten Samples">
+            <button class="filter-btn" data-days="7">7d</button>
+            <button class="filter-btn" data-days="30">30d</button>
+            <button class="filter-btn active" data-days="90">90d</button>
+            <button class="filter-btn" data-days="0">Alles</button>
+        </span>
         <button class="theme-btn" onclick="toggleTheme()" id="theme-toggle">🌙 Dark</button>
         <a href="/">&larr; Start</a>
     </div>
@@ -585,12 +602,29 @@ function resolutionForZoom(zoom) {
 let hexLayer = L.layerGroup().addTo(map);
 let firstLoad = true;
 
+// Zeitraum-Filter (Default 90 Tage). Wird in localStorage gespeichert.
+let activeDays = parseInt(localStorage.getItem("ft-map-days") ?? "90", 10);
+function applyFilterButtons() {
+    document.querySelectorAll(".filter-btn").forEach(b => {
+        b.classList.toggle("active", parseInt(b.dataset.days, 10) === activeDays);
+    });
+}
+document.querySelectorAll(".filter-btn").forEach(b => {
+    b.addEventListener("click", () => {
+        activeDays = parseInt(b.dataset.days, 10);
+        localStorage.setItem("ft-map-days", String(activeDays));
+        applyFilterButtons();
+        loadHexes();
+    });
+});
+applyFilterButtons();
+
 async function loadHexes() {
     const zoom = map.getZoom();
     const res = resolutionForZoom(zoom);
 
     try {
-        const r = await fetch("/api/map?res=" + res);
+        const r = await fetch("/api/map?res=" + res + "&days=" + activeDays);
         const d = await r.json();
         const hexes = d.hexes || [];
 
