@@ -167,6 +167,7 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	s.registerTelemetryServer()
 	s.registerStationHandlers()
 	s.registerLiveHandlers()
+	s.registerMitmachenHandlers()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {

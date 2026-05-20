@@ -461,6 +461,7 @@ tls = true
 username = DEINE_DIGITALFUNK_ID
 password = "blafablafa"</pre>
         <p style="margin-top:12px;font-size:0.82rem">Keine Registrierung noetig! Deine <a href="https://radioid.net" style="color:var(--blue)">Digitalfunk-ID</a> wird automatisch verifiziert. Passwort: <code style="color:var(--accent);font-family:'JetBrains Mono',monospace">blafablafa</code></p>
+        <p style="margin-top:14px"><a href="/mitmachen" style="color:var(--accent);font-weight:600">→ Vollständige Anleitung: Mitmachen mit eigener BlueStation</a></p>
     </div>
 
     {{SERVER_INFO_CARD}}
