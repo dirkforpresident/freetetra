@@ -378,8 +378,8 @@ body {
             <div class="svc">
                 <div class="svc-tg">TG 1-9</div>
                 <div>
-                    <div class="svc-name">Lokal</div>
-                    <div class="svc-desc">Nur deine Cell, geht nie ueber den Funkbereich hinaus. Per Konvention: TG 7-9 fuer lokale Service-Bots (Echo, Wetter, etc.) — jeder Server-Operator hostet die eigenen.</div>
+                    <div class="svc-name">Server-lokal</div>
+                    <div class="svc-desc">Bleibt auf diesem Server — wird NICHT zu anderen FreeTetra-Servern foederiert. Innerhalb des Servers an alle verbundenen Cells. Per Konvention: TG 7-9 fuer Service-Bots (Echo, Wetter, etc.) — jeder Server-Operator hostet die eigenen.</div>
                 </div>
             </div>
             <div class="svc">
