@@ -386,11 +386,11 @@ body {
 
     <div class="card">
         <h2>Was ist FreeTetra?</h2>
-        <p>Foederierter TETRA-Brew-Server fuer Amateurfunk. Mehrere unabhaengige Server peeren ueber das Brew-Protokoll (binary WebSocket) — wie SMTP zwischen Mailservern. Subscriber (ISSI) sind serverlokal, ausgewaehlte Talkgroups (GSSI) werden zwischen Servern geroutet. Authentifizierung ueber RadioID, keine zentrale Registrierung.</p>
-        <p><strong>FreeTetra</strong> ist sowohl das Projekt als auch der erste Server: was hier auf <code>{{HOST}}</code> laeuft, kannst du genauso selber hosten und mit allen anderen FreeTetra-Servern peeren.</p>
+        <p>Freies, foederiertes TETRA-Netz fuer Amateurfunk. Jeder Operator kann einen eigenen Server betreiben — die Server verbinden sich untereinander und teilen ausgewaehlte Talkgroups. Anmeldung mit deiner RadioID, kein zentraler Account.</p>
+        <p><strong>FreeTetra</strong> ist sowohl das Projekt als auch der erste Server: was hier auf <code>{{HOST}}</code> laeuft, kannst du genauso selber hosten und mit anderen FreeTetra-Servern peeren.</p>
 
         <div class="federation-info">
-            Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation) und dem <code>Brew</code>-Protokoll.
+            Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation, Apache 2.0).
         </div>
     </div>
 
