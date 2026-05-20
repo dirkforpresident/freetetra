@@ -369,20 +369,6 @@ body {
         <div class="tagline">Freies, foederiertes TETRA-Netz fuer Amateurfunk</div>
     </div>
 
-    <div class="stats">
-        <div class="stat">
-            <div class="stat-value"><span class="stat-dot"></span><span id="s-clients">-</span></div>
-            <div class="stat-label">Repeater</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value" id="s-subs">-</div>
-            <div class="stat-label">Subscriber</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value" id="s-positions">-</div>
-            <div class="stat-label">Positionen</div>
-        </div>
-    </div>
 
     <div class="card">
         <h2>Was ist FreeTetra?</h2>
@@ -472,19 +458,5 @@ password = "blafablafa"</pre>
     </div>
 </div>
 
-<script>
-function update() {
-    fetch("/api/public/status")
-        .then(r => r.json())
-        .then(d => {
-            document.getElementById("s-clients").textContent = d.repeaters || 0;
-            document.getElementById("s-subs").textContent = d.subscribers || 0;
-            document.getElementById("s-positions").textContent = d.positions || 0;
-        })
-        .catch(() => {});
-}
-update();
-setInterval(update, 10000);
-</script>
 </body>
 </html>`
