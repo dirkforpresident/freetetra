@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // freetetraAdminHTML is the clean admin dashboard for FreeTetra operators.
@@ -12,7 +13,7 @@ const freetetraAdminHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FreeTetra Admin — DO0RAM</title>
+<title>FreeTetra Admin — {{SERVER_NAME}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -446,8 +447,13 @@ func (s *Service) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	serverName := s.cfg.Federation.Name
+	if serverName == "" {
+		serverName = "FreeTetra"
+	}
+	html := strings.ReplaceAll(freetetraAdminHTML, "{{SERVER_NAME}}", serverName)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(freetetraAdminHTML))
+	w.Write([]byte(html))
 }
 
 // handlePeersAPI returns connected federation peers (for admin dashboard).
