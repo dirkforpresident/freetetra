@@ -38,8 +38,19 @@ func newLastHeardBuffer(maxLen int) *LastHeardBuffer {
 	}
 }
 
+// isServiceISSI returns true for ISSIs reserved fuer Service-Bots
+// (Webradio, Echo, SDS-Inject, etc.) — die sollen nicht im Last-Heard
+// erscheinen, sonst spammen sie den Feed zu. Echte Funkamateure haben
+// laenderspezifische ISSIs (DL z.B. 262XXXX), nie >= 900000.
+func isServiceISSI(issi uint32) bool {
+	return issi >= 900000 && issi <= 999999
+}
+
 // Start records a new call. If a call with the same ID exists, it's left untouched.
 func (b *LastHeardBuffer) Start(callID uuid.UUID, sourceISSI, destGSSI uint32, origin string) {
+	if isServiceISSI(sourceISSI) {
+		return
+	}
 	id := callID.String()
 	b.mu.Lock()
 	defer b.mu.Unlock()
