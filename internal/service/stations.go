@@ -156,6 +156,11 @@ func (s *Service) handleStationPush(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Federation-Sync: Station an alle Peers melden, damit jeder Server die
+	// gleiche Station-Liste hat (Welt-Map statt pro-Server-fragmentiert).
+	if s.federation != nil {
+		s.federation.NotifyStationUpdate(saved)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "station": saved})
 }

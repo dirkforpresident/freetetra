@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -83,16 +84,26 @@ func (fb *federationBridge) syncAllSubscribers() {
 		return
 	}
 	clients := fb.svc.server.SnapshotClients()
-	count := 0
+	subCount := 0
 	for _, c := range clients {
 		for _, sub := range c.Subscribers {
 			gssis := append([]uint32(nil), sub.Groups...)
 			fb.hub.BroadcastSubscriber(sub.Number, "register", gssis)
-			count++
+			subCount++
 		}
 	}
-	if count > 0 {
-		fb.logger.Printf("federation: anti-entropy sync sent %d subscribers", count)
+	// Stations mitsynchronisieren — falls ein Peer-Server neu connectet
+	// oder nach Netzaussetzer, kriegt er den aktuellen Stations-Stand.
+	stCount := 0
+	if fb.svc.stationStore != nil {
+		for _, st := range fb.svc.stationStore.All() {
+			st := st // copy
+			fb.NotifyStationUpdate(&st)
+			stCount++
+		}
+	}
+	if subCount > 0 || stCount > 0 {
+		fb.logger.Printf("federation: anti-entropy sync sent %d subscribers, %d stations", subCount, stCount)
 	}
 }
 
@@ -171,6 +182,26 @@ func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, f
 	lengthBits := uint16(len(frameData) * 8)
 	wire := brew.BuildFrame(brew.FrameTypeTrafficChannel, uid, lengthBits, frameData)
 	fb.svc.server.BroadcastToGroup(call.DestinationGSI, wire, "")
+}
+
+// OnPeerStationUpdate wird vom Federation-Hub aufgerufen, wenn ein Peer einen
+// BlueStation-Heartbeat (Station-Push) weiterreicht. Wir uebernehmen die Station
+// in unseren lokalen stationStore.
+func (fb *federationBridge) OnPeerStationUpdate(peerName string, stationMap map[string]any) {
+	if fb.svc.stationStore == nil || stationMap == nil {
+		return
+	}
+	b, err := json.Marshal(stationMap)
+	if err != nil {
+		return
+	}
+	var st Station
+	if err := json.Unmarshal(b, &st); err != nil {
+		return
+	}
+	if _, err := fb.svc.stationStore.Upsert(st); err != nil {
+		fb.logger.Printf("federation: station upsert from %s failed: %v", peerName, err)
+	}
 }
 
 // OnPeerPositionSample wird vom Federation-Hub aufgerufen, wenn ein Peer
@@ -257,6 +288,24 @@ func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, 
 		return
 	}
 	fb.hub.BroadcastPositionSample(issi, lat, lon, repeater)
+}
+
+// NotifyStationUpdate broadcasted einen BlueStation-Heartbeat an alle Peers.
+func (fb *federationBridge) NotifyStationUpdate(st *Station) {
+	if fb.hub == nil || st == nil {
+		return
+	}
+	// Station -> map[string]any via JSON-Roundtrip (vermeidet harte Coupling
+	// zwischen federation und service Paketen).
+	b, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return
+	}
+	fb.hub.BroadcastStation(m)
 }
 
 // NotifyCallStart notifies peers about a local group call start.

@@ -20,6 +20,7 @@ const (
 	MsgUsersDBOffer     = "usersdb_offer"     // Advertise users.txt timestamp
 	MsgUsersDBRequest   = "usersdb_request"   // Request users.txt from peer
 	MsgPositionSample   = "position_sample"   // LIP position sample fuer Coverage-Federation
+	MsgStationUpdate    = "station_update"    // BlueStation-Heartbeat fuer Stations-Federation
 )
 
 // ProtocolVersion is the federation protocol version.
@@ -71,6 +72,10 @@ type Message struct {
 	Lat      float64 `json:"lat,omitempty"`
 	Lon      float64 `json:"lon,omitempty"`
 	Repeater string  `json:"repeater,omitempty"`
+
+	// Station-Update (Stations-Federation). map[string]any damit wir Station-Felder
+	// ohne harte Abhaengigkeit hier transportieren koennen.
+	Station map[string]any `json:"station,omitempty"`
 }
 
 // GossipPeer is a known peer advertised during peer exchange.

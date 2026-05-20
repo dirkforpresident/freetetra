@@ -28,6 +28,7 @@ type CallHandler interface {
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
 	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string)
+	OnPeerStationUpdate(peerName string, station map[string]any)
 	GetLocalSubscribers() map[uint32][]uint32
 
 	// Users DB sync (optional — return empty if not available)
@@ -395,6 +396,15 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 			relay := h.mesh.PrepareRelay(&msg)
 			h.relayToPeers(relay, peer.Name)
 		}
+
+	case MsgStationUpdate:
+		if h.handler != nil {
+			h.handler.OnPeerStationUpdate(peer.Name, msg.Station)
+		}
+		if h.mesh.ShouldRelay(&msg) {
+			relay := h.mesh.PrepareRelay(&msg)
+			h.relayToPeers(relay, peer.Name)
+		}
 	}
 }
 
@@ -496,6 +506,18 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 		h.callMu.Unlock()
 	}
 	h.mu.RUnlock()
+}
+
+// BroadcastStation sendet einen BlueStation-Heartbeat an alle Peers
+// (Stations-Federation). Damit zeigen alle Server die gleiche Station-Liste.
+func (h *Hub) BroadcastStation(station map[string]any) {
+	msg := &Message{
+		Type:    MsgStationUpdate,
+		Origin:  h.serverName,
+		Station: station,
+	}
+	h.mesh.PrepareOutgoing(msg)
+	h.broadcastToAllPeers(msg)
 }
 
 // BroadcastPositionSample sendet einen empfangenen Position-Sample an alle Peers
