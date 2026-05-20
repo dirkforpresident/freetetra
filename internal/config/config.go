@@ -26,6 +26,13 @@ type Config struct {
 	MOTD       MOTDConfig
 	SIP        SIPConfig
 	Federation FederationConfig
+	Operator   OperatorConfig
+}
+
+type OperatorConfig struct {
+	Name        string // z.B. "DO1XX"
+	Contact     string // z.B. "dirkforpresident@gmail.com" oder Matrix-Handle
+	Description string // freie Beschreibung dieses Servers/Clusters
 }
 
 type MOTDConfig struct {
@@ -331,6 +338,11 @@ func LoadFromEnv() (Config, error) {
 			Key:     env("FEDERATION_KEY", ""),
 			Peers:   envCSV("FEDERATION_PEERS"),
 			SelfURL: env("FEDERATION_SELF_URL", ""),
+		},
+		Operator: OperatorConfig{
+			Name:        env("OPERATOR_NAME", ""),
+			Contact:     env("OPERATOR_CONTACT", ""),
+			Description: env("OPERATOR_DESCRIPTION", ""),
 		},
 		Echo: EchoConfig{
 			Talkgroup:     uint32(envInt("ECHO_TALKGROUP", 10002)),

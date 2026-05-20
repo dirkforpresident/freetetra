@@ -2,7 +2,9 @@ package service
 
 import (
 	"encoding/json"
+	"html"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -61,7 +63,50 @@ func (s *Service) handleLandingPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(landingPageHTML))
+	w.Write([]byte(s.renderLandingPage(r.Host)))
+}
+
+func (s *Service) renderLandingPage(host string) string {
+	serverName := s.cfg.Federation.Name
+	if serverName == "" {
+		serverName = "FreeTetra"
+	}
+	op := s.cfg.Operator
+	operator := op.Name
+	if operator == "" {
+		operator = serverName
+	}
+
+	// Server-Info Card (nur wenn mind. eines der Operator-Felder gesetzt)
+	serverInfo := ""
+	if op.Name != "" || op.Contact != "" || op.Description != "" {
+		var b strings.Builder
+		b.WriteString(`<div class="card"><h2>Ueber diesen Server</h2>`)
+		b.WriteString(`<p><strong>` + html.EscapeString(host) + `</strong> — Cluster <code>` + html.EscapeString(serverName) + `</code></p>`)
+		if op.Description != "" {
+			b.WriteString(`<p>` + html.EscapeString(op.Description) + `</p>`)
+		}
+		b.WriteString(`<p style="font-size:0.88rem;color:var(--text-muted)">`)
+		if op.Name != "" {
+			b.WriteString(`Betreiber: <strong>` + html.EscapeString(op.Name) + `</strong>`)
+		}
+		if op.Contact != "" {
+			if op.Name != "" {
+				b.WriteString(` · `)
+			}
+			b.WriteString(`Kontakt: <code>` + html.EscapeString(op.Contact) + `</code>`)
+		}
+		b.WriteString(`</p></div>`)
+		serverInfo = b.String()
+	}
+
+	r := strings.NewReplacer(
+		"{{HOST}}", html.EscapeString(host),
+		"{{SERVER_NAME}}", html.EscapeString(serverName),
+		"{{OPERATOR}}", html.EscapeString(operator),
+		"{{SERVER_INFO_CARD}}", serverInfo,
+	)
+	return r.Replace(landingPageHTML)
 }
 
 const landingPageHTML = `<!DOCTYPE html>
@@ -342,7 +387,7 @@ body {
     <div class="card">
         <h2>Was ist FreeTetra?</h2>
         <p>Foederierter TETRA-Brew-Server fuer Amateurfunk. Mehrere unabhaengige Server peeren ueber das Brew-Protokoll (binary WebSocket) — wie SMTP zwischen Mailservern. Subscriber (ISSI) sind serverlokal, ausgewaehlte Talkgroups (GSSI) werden zwischen Servern geroutet. Authentifizierung ueber RadioID, keine zentrale Registrierung.</p>
-        <p><strong>FreeTetra</strong> ist sowohl das Projekt als auch der erste Server: was hier auf <code>freetetra.de</code> laeuft, kannst du genauso selber hosten und mit allen anderen FreeTetra-Servern peeren.</p>
+        <p><strong>FreeTetra</strong> ist sowohl das Projekt als auch der erste Server: was hier auf <code>{{HOST}}</code> laeuft, kannst du genauso selber hosten und mit allen anderen FreeTetra-Servern peeren.</p>
 
         <div class="federation-info">
             Basiert auf <code>BlueStation</code> (Open Source TETRA-Basisstation) und dem <code>Brew</code>-Protokoll.
@@ -410,7 +455,7 @@ body {
         <h2>Server verbinden</h2>
         <p>BlueStation-Config — einfach den Brew-Host auf diesen Server zeigen:</p>
         <pre style="background:var(--bg);padding:16px;border-radius:8px;border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:var(--accent);overflow-x:auto;margin-top:8px">[brew]
-host = "freetetra.de"
+host = "{{HOST}}"
 port = 443
 tls = true
 username = DEINE_DIGITALFUNK_ID
@@ -418,8 +463,10 @@ password = "blafablafa"</pre>
         <p style="margin-top:12px;font-size:0.82rem">Keine Registrierung noetig! Deine <a href="https://radioid.net" style="color:var(--blue)">Digitalfunk-ID</a> wird automatisch verifiziert. Passwort: <code style="color:var(--accent);font-family:'JetBrains Mono',monospace">blafablafa</code></p>
     </div>
 
+    {{SERVER_INFO_CARD}}
+
     <div class="footer">
-        <p>FreeTetra — Betrieben von DO0RAM (DO1XX)</p>
+        <p>FreeTetra — Betrieben von {{OPERATOR}}</p>
         <p style="margin-top:4px">Powered by <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">BlueStation</a></p>
     </div>
 </div>
