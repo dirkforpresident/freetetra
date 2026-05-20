@@ -46,9 +46,21 @@ func isServiceISSI(issi uint32) bool {
 	return issi >= 900000 && issi <= 999999
 }
 
+// ignoredLastHeardGSSIs sind Talkgroups die nicht im Last-Heard auftauchen
+// sollen — typischerweise Status/LIP-Pseudo-Calls von Funkgeraeten die
+// Position-Updates via Circuit Mode senden (statt SDS).
+var ignoredLastHeardGSSIs = map[uint32]struct{}{
+	262999: {}, // DO1XX/andere: TETRA-Funkgeraet LIP-Status-Updates
+}
+
+func isIgnoredGSSI(gssi uint32) bool {
+	_, ok := ignoredLastHeardGSSIs[gssi]
+	return ok
+}
+
 // Start records a new call. If a call with the same ID exists, it's left untouched.
 func (b *LastHeardBuffer) Start(callID uuid.UUID, sourceISSI, destGSSI uint32, origin string) {
-	if isServiceISSI(sourceISSI) {
+	if isServiceISSI(sourceISSI) || isIgnoredGSSI(destGSSI) {
 		return
 	}
 	id := callID.String()
