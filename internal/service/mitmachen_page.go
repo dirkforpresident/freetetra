@@ -182,15 +182,19 @@ TG 91+      BrandMeister-Kompatibilitaet (DMR-Bridge)
 
     <div class="card">
         <h2>Pfad 2: Eigener Server</h2>
-        <p>Wenn deine Gruppe (OV, Verein, Bastelrunde) einen eigenen lokalen Cluster will: du betreibst einen FreeTetra-Server, deine BlueStations connecten dort, ihr peert mit <code>freetetra.de</code> und anderen FreeTetra-Servern.</p>
+        <p>Wenn deine Gruppe (OV, Verein, Funkrunde) einen eigenen lokalen Cluster will: du betreibst einen FreeTetra-Server, deine BlueStations connecten dort, ihr peert mit <code>freetetra.de</code> und anderen FreeTetra-Servern.</p>
         <p>Was du brauchst:</p>
         <ul>
             <li>Linux-VM oder kleiner Server (1 vCPU, 512 MB RAM reicht)</li>
             <li>Domain mit SSL</li>
-            <li>FreeTetra-Server-Software (Go-Binary; das Repo wird oeffentlich sobald wir stabil sind)</li>
-            <li>Federation-Peer-Setup mit Shared Key</li>
+            <li>FreeTetra-Server-Software (Go-Binary; Repo wird oeffentlich sobald stabil)</li>
         </ul>
-        <p>Bei Interesse: melde dich. Setup-Anleitung + Federation-Key gibt es per Mail.</p>
+
+        <h3>Federation</h3>
+        <p>Federation laeuft ueber einen <strong>symmetrischen Shared Key</strong>. Damit ein neuer Server am offenen FreeTetra-Netz peeren kann, nutzt er einfach:</p>
+        <pre>FEDERATION_KEY=freetetra-federation-2026
+FEDERATION_PEERS=wss://freetetra.de/peer/</pre>
+        <p style="font-size:0.88rem">Der Key ist <strong>bewusst oeffentlich</strong> — FreeTetra ist offen, jeder darf mitmachen. Wer ein <strong>privates Mesh</strong> aufbauen will (z.B. nur fuer den eigenen Verein, ohne Verbindung zum oeffentlichen Netz), waehlt einfach einen eigenen <code>FEDERATION_KEY</code> und tauscht den nur mit den eigenen Peers aus.</p>
     </div>
 
     <div class="card">
