@@ -661,6 +661,12 @@ func (h *Hub) sendPeerExchange(peer *Peer) {
 // tryAddDiscoveredPeer adds a newly discovered peer and connects to it.
 // Returns true if the peer was new.
 func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
+	// Self-Check: niemals zu sich selbst connecten (sonst Geister-Peer
+	// "HH-Cluster incoming" auf eigenem Server).
+	if name == h.serverName || url == h.selfURL {
+		return false
+	}
+
 	h.knownMu.Lock()
 	// Dedup by name OR by URL — a bootstrap peer (e.g. "peer-0") may already
 	// point at the same URL under a different label.
