@@ -347,18 +347,25 @@ body {
         <h2>Was los ist im Netz</h2>
         <p>Live mitschauen wer am Funken ist und wo Coverage besteht:</p>
         <div class="services" style="margin-top:12px">
+            <a href="/live" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
+                <div class="svc-tg">/live</div>
+                <div>
+                    <div class="svc-name">Last Heard</div>
+                    <div class="svc-desc">Wer hat zuletzt gesprochen — Callsign, ISSI, Talkgroup, Dauer. Live-Update alle 2 Sek.</div>
+                </div>
+            </a>
             <a href="/map" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
                 <div class="svc-tg">/map</div>
                 <div>
                     <div class="svc-name">Coverage-Map</div>
-                    <div class="svc-desc">Wo Funkgeraete erfolgreich gesehen werden — automatisch aus LIP-Positions aufgebaut, in H3-Hexagons aggregiert (Street/City/Region je nach Zoom).</div>
+                    <div class="svc-desc">Wo Funkgeraete erfolgreich gesehen werden — automatisch aus LIP-Positions, in H3-Hexagons aggregiert (Street/City/Region je nach Zoom).</div>
                 </div>
             </a>
             <a href="/ui" class="svc" style="text-decoration:none;color:inherit;cursor:pointer">
                 <div class="svc-tg">/ui</div>
                 <div>
                     <div class="svc-name">Dashboard</div>
-                    <div class="svc-desc">Live-Uebersicht: verbundene Repeater, eingebuchte Subscriber, aktive Calls, Federation-Peers.</div>
+                    <div class="svc-desc">Volle Uebersicht: Repeater, Subscriber, Federation-Peers, SDS-Console.</div>
                 </div>
             </a>
         </div>
