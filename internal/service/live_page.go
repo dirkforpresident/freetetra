@@ -120,8 +120,34 @@ a:hover { text-decoration: underline; }
 
 @media (max-width: 640px) {
     .container { padding: 14px; }
-    .row { flex-wrap: wrap; gap: 8px; font-size: 0.84rem; }
-    .row .when { margin-left: 0; flex-basis: 100%; }
+    .header { margin-bottom: 16px; padding-bottom: 12px; }
+    .header h1 { font-size: 1.3rem; }
+    .header .meta { font-size: 0.72rem; }
+    .card { padding: 14px; margin-bottom: 12px; }
+    .card h2 { font-size: 0.85rem; }
+    .row {
+        flex-wrap: wrap;
+        gap: 4px 10px;
+        font-size: 0.85rem;
+        padding: 10px 12px;
+    }
+    .row .cs    { min-width: 0; flex: 1 1 auto; }
+    .row .issi  { min-width: 0; font-size: 0.75rem; }
+    .row .tg    { min-width: 0; }
+    .row .dur   { min-width: 0; font-size: 0.78rem; }
+    .row .badge { font-size: 0.65rem; padding: 1px 6px; }
+    .row .when  {
+        flex-basis: 100%;
+        margin-left: 0;
+        font-size: 0.72rem;
+        text-align: right;
+        margin-top: 2px;
+    }
+}
+@media (max-width: 380px) {
+    /* Sehr kleine Screens — ISSI weglassen wenn Callsign da ist */
+    .row .issi { display: none; }
+    .row.has-callsign .issi { display: none; }
 }
 </style>
 </head>
