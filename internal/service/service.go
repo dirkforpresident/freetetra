@@ -290,7 +290,7 @@ func (s *Service) OnMessage(client *brew.Client, msg brew.ParsedMessage) {
 		s.broadcastAttachmentControl("subscriber_update", client)
 		s.maybeSendMOTDForSubscriber(client, m)
 		if s.federation != nil {
-			s.federation.NotifySubscriberUpdate(m.Number, "update", m.Groups)
+			s.federation.NotifySubscriberUpdate(m.Number, "register", m.Groups)
 		}
 	}
 }

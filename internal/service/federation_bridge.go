@@ -87,7 +87,7 @@ func (fb *federationBridge) syncAllSubscribers() {
 	for _, c := range clients {
 		for _, sub := range c.Subscribers {
 			gssis := append([]uint32(nil), sub.Groups...)
-			fb.hub.BroadcastSubscriber(sub.Number, "sync", gssis)
+			fb.hub.BroadcastSubscriber(sub.Number, "register", gssis)
 			count++
 		}
 	}
