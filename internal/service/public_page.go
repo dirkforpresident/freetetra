@@ -355,7 +355,7 @@ body {
         <h2>Server verbinden</h2>
         <p>BlueStation-Config — einfach den Brew-Host auf diesen Server zeigen:</p>
         <pre style="background:var(--bg);padding:16px;border-radius:8px;border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:var(--accent);overflow-x:auto;margin-top:8px">[brew]
-host = "freetetra.1xx.is"
+host = "freetetra.de"
 port = 443
 tls = true
 username = DEINE_DIGITALFUNK_ID
