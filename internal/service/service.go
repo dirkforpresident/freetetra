@@ -244,6 +244,11 @@ func (s *Service) OnDisconnect(client *brew.Client) {
 			s.lastHeard.End(call.ID)
 		}
 	}
+	if s.federation != nil {
+		for _, call := range toRelease {
+			s.federation.NotifyCallEnd(call.ID.String(), 0)
+		}
+	}
 
 	for _, call := range toRelease {
 		release := brew.BuildCallRelease(call.ID, s.cfg.Netstack.ReleaseCause)
@@ -284,6 +289,9 @@ func (s *Service) OnMessage(client *brew.Client, msg brew.ParsedMessage) {
 		})
 		s.broadcastAttachmentControl("subscriber_update", client)
 		s.maybeSendMOTDForSubscriber(client, m)
+		if s.federation != nil {
+			s.federation.NotifySubscriberUpdate(m.Number, "update", m.Groups)
+		}
 	}
 }
 
@@ -400,6 +408,9 @@ func (s *Service) onCallControlFromClient(client *brew.Client, m *brew.CallContr
 		if s.lastHeard != nil {
 			s.lastHeard.Start(m.Identifier, trackSource, trackDest, "subscriber")
 		}
+		if s.federation != nil {
+			s.federation.NotifyCallStart(m.Identifier.String(), trackSource, trackDest, 0, 0)
+		}
 	}
 
 	if s.maybeHandleVirtualCircuitCallControl(client, m, source, dest) {
@@ -455,6 +466,9 @@ func (s *Service) onCallControlFromClient(client *brew.Client, m *brew.CallContr
 		if s.lastHeard != nil {
 			s.lastHeard.End(m.Identifier)
 		}
+		if s.federation != nil {
+			s.federation.NotifyCallEnd(m.Identifier.String(), 0)
+		}
 	}
 }
 
@@ -499,6 +513,9 @@ func (s *Service) onVoiceFrameFromClient(client *brew.Client, m *brew.FrameMessa
 			return
 		}
 		_ = s.broadcastByDestinationType(call.DestinationType, call.DestinationGSI, wire, client.ID)
+		if s.federation != nil && call.DestinationType == destinationTypeGroup {
+			s.federation.NotifyVoiceFrame(m.Identifier.String(), m.Data)
+		}
 		return
 	}
 
@@ -1150,6 +1167,9 @@ func (s *Service) StartInjectedGroupTX(
 	// SDS-Inject) wuerden den Last-Heard-Feed sonst zuspammen. Echte Subscriber
 	// und ueber den DMR-Bridge-Client reinkommende DMR-Calls landen in dem
 	// "subscriber"-Pfad und werden gezeigt.
+	if s.federation != nil {
+		s.federation.NotifyCallStart(callID.String(), sourceISSI, destinationGSI, priority, service)
+	}
 
 	wire := brew.BuildGroupTXWithAccess(callID, sourceISSI, destinationGSI, priority, access, service)
 	recipients := s.server.BroadcastToGroup(destinationGSI, wire, "")
@@ -1159,6 +1179,9 @@ func (s *Service) StartInjectedGroupTX(
 		s.callMu.Unlock()
 		if s.lastHeard != nil {
 			s.lastHeard.End(callID)
+		}
+		if s.federation != nil {
+			s.federation.NotifyCallEnd(callID.String(), 0)
 		}
 		s.logger.Printf(
 			"%s group-tx ignored call=%s source=%d tg=%d recipients=0",
@@ -1207,6 +1230,9 @@ func (s *Service) ReleaseInjectedCall(origin string, callID uuid.UUID, cause uin
 	// Pendant zu StartInjectedGroupTX: injected calls werden in last-heard nicht
 	// getrackt, daher hier auch kein End-Aufruf noetig (End() ohne vorheriges
 	// Start() ist no-op, aber sauber lassen wir es weg).
+	if s.federation != nil {
+		s.federation.NotifyCallEnd(callID.String(), cause)
+	}
 	if call == nil {
 		return
 	}
