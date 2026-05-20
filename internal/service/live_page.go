@@ -45,16 +45,72 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
 .card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
 
-.row { display: flex; gap: 14px; padding: 10px 12px; border-radius: 8px; background: var(--bg-subtle); margin-bottom: 6px; font-size: 0.9rem; align-items: center; }
-.row.live { background: var(--accent-dim); border: 1px solid var(--accent); }
+.row {
+    display: flex; gap: 14px; padding: 10px 12px; border-radius: 8px;
+    background: var(--bg-subtle); margin-bottom: 6px; font-size: 0.9rem; align-items: center;
+    border: 1px solid transparent;
+    transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
 .row .cs { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text); min-width: 84px; }
 .row .issi { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); font-size: 0.8rem; min-width: 80px; }
-.row .tg { font-family: 'JetBrains Mono', monospace; color: var(--blue); font-weight: 600; min-width: 60px; }
+.row .tg { font-family: 'JetBrains Mono', monospace; font-weight: 600; min-width: 60px; }
 .row .dur { color: var(--text-muted); font-size: 0.82rem; min-width: 70px; }
 .row .when { color: var(--text-muted); font-size: 0.82rem; margin-left: auto; }
-.row .origin { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.row .badge {
+    font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+}
 
-.pulse-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: pulse 1s infinite; margin-right: 6px; }
+/* Past calls: subtle border in network color */
+.row.local       { border-color: rgba(107,114,128,0.25); }
+.row.local .tg   { color: var(--text-muted); }
+.row.local .badge{ background: rgba(107,114,128,0.12); color: var(--text-muted); }
+
+.row.tetra       { border-color: rgba(5,150,105,0.25); }
+.row.tetra .tg   { color: var(--accent); }
+.row.tetra .badge{ background: rgba(5,150,105,0.12); color: var(--accent); }
+
+.row.dmr         { border-color: rgba(217,119,6,0.3); }
+.row.dmr .tg     { color: #d97706; }
+.row.dmr .badge  { background: rgba(217,119,6,0.12); color: #d97706; }
+
+/* Active calls: strong glow + pulse */
+.row.live.local  {
+    background: rgba(107,114,128,0.08);
+    border-color: var(--text-muted);
+    box-shadow: 0 0 24px rgba(107,114,128,0.5), 0 0 6px rgba(107,114,128,0.3);
+    animation: glow-local 1.6s infinite;
+}
+.row.live.tetra  {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    box-shadow: 0 0 24px rgba(5,150,105,0.6), 0 0 6px rgba(5,150,105,0.4);
+    animation: glow-tetra 1.6s infinite;
+}
+.row.live.dmr    {
+    background: rgba(217,119,6,0.08);
+    border-color: #d97706;
+    box-shadow: 0 0 24px rgba(217,119,6,0.6), 0 0 6px rgba(217,119,6,0.4);
+    animation: glow-dmr 1.6s infinite;
+}
+
+@keyframes glow-tetra {
+    0%, 100% { box-shadow: 0 0 24px rgba(5,150,105,0.6), 0 0 6px rgba(5,150,105,0.4); }
+    50%      { box-shadow: 0 0 36px rgba(5,150,105,0.9), 0 0 12px rgba(5,150,105,0.6); }
+}
+@keyframes glow-dmr {
+    0%, 100% { box-shadow: 0 0 24px rgba(217,119,6,0.6), 0 0 6px rgba(217,119,6,0.4); }
+    50%      { box-shadow: 0 0 36px rgba(217,119,6,0.9), 0 0 12px rgba(217,119,6,0.6); }
+}
+@keyframes glow-local {
+    0%, 100% { box-shadow: 0 0 16px rgba(107,114,128,0.4), 0 0 4px rgba(107,114,128,0.3); }
+    50%      { box-shadow: 0 0 24px rgba(107,114,128,0.6), 0 0 8px rgba(107,114,128,0.4); }
+}
+
+.pulse-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; animation: pulse 1s infinite; margin-right: 6px; }
+.row.live.tetra .pulse-dot { background: var(--accent); }
+.row.live.dmr   .pulse-dot { background: #d97706; }
+.row.live.local .pulse-dot { background: var(--text-muted); }
 @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } }
 
 .empty { color: var(--text-muted); padding: 14px; text-align: center; font-size: 0.88rem; font-style: italic; }
@@ -111,16 +167,28 @@ function fmtAgo(iso) {
     if (h < 24) return 'vor ' + h + 'h';
     return 'vor ' + Math.floor(h / 24) + 'd';
 }
+function networkClass(gssi) {
+    if (gssi >= 91) return 'dmr';
+    if (gssi >= 10) return 'tetra';
+    return 'local';
+}
+function networkLabel(gssi) {
+    if (gssi >= 91) return 'DMR';
+    if (gssi >= 10) return 'TETRA';
+    return 'LOKAL';
+}
 function renderRow(e, live) {
     const cs = e.callsign ? e.callsign : '';
     const dur = live ? fmtDuration(Date.now() - new Date(e.started_at).getTime()) : fmtDuration(e.duration_ms);
     const dot = live ? '<span class="pulse-dot"></span>' : '';
-    return '<div class="row' + (live ? ' live' : '') + '">' +
+    const net = networkClass(e.dest_gssi);
+    const lbl = networkLabel(e.dest_gssi);
+    return '<div class="row ' + net + (live ? ' live' : '') + '">' +
         '<span class="cs">' + dot + (cs || '–') + '</span>' +
         '<span class="issi">' + e.source_issi + '</span>' +
         '<span class="tg">TG ' + e.dest_gssi + '</span>' +
         '<span class="dur">' + dur + '</span>' +
-        '<span class="origin">' + (e.origin || '') + '</span>' +
+        '<span class="badge">' + lbl + '</span>' +
         '<span class="when">' + fmtAgo(e.started_at) + '</span>' +
         '</div>';
 }
