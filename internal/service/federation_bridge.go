@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -48,6 +49,51 @@ func (fb *federationBridge) start(ctx context.Context) {
 	// Start outgoing peer connections
 	fb.hub.Start(ctx, peers)
 	fb.logger.Printf("federation: started with %d peer(s) configured", len(peers))
+
+	// Periodic anti-entropy sync — alle 30 Sek den kompletten lokalen
+	// Subscriber-State an alle Peers schicken. Damit konvergieren Peers nach
+	// Restart, Netzaussetzer oder neuer Connection automatisch — ohne dass
+	// User auf seinem Funkgeraet was machen muss.
+	go fb.syncLoop(ctx)
+}
+
+func (fb *federationBridge) syncLoop(ctx context.Context) {
+	// Initial delay damit die Peer-Verbindungen erstmal aufbauen koennen.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+	}
+	fb.syncAllSubscribers()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fb.syncAllSubscribers()
+		}
+	}
+}
+
+func (fb *federationBridge) syncAllSubscribers() {
+	if fb.hub == nil {
+		return
+	}
+	clients := fb.svc.server.SnapshotClients()
+	count := 0
+	for _, c := range clients {
+		for _, sub := range c.Subscribers {
+			gssis := append([]uint32(nil), sub.Groups...)
+			fb.hub.BroadcastSubscriber(sub.Number, "sync", gssis)
+			count++
+		}
+	}
+	if count > 0 {
+		fb.logger.Printf("federation: anti-entropy sync sent %d subscribers", count)
+	}
 }
 
 // ==================================================================
