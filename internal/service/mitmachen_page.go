@@ -121,40 +121,41 @@ pre {
             <div class="path-icon">🗼</div>
             <div>
                 <div class="path-name">Als Relais-Betreiber</div>
-                <div class="path-desc">Hoehere Power, externe Antenne, BNetzA-Repeater-Genehmigung. Selten.</div>
+                <div class="path-desc">Hoehere Power, externe Antenne, BNetzA-Repeater-Genehmigung.</div>
             </div>
         </div>
         <div class="path">
             <div class="path-icon">🌐</div>
             <div>
                 <div class="path-name">Als Server-Operator</div>
-                <div class="path-desc">Eigenen FreeTetra-Server fuer einen lokalen Cluster (OV, Notfunk, Verein).</div>
+                <div class="path-desc">Eigenen FreeTetra-Server fuer einen lokalen Cluster (OV, Verein, Gruppe).</div>
             </div>
         </div>
     </div>
 
     <div class="card">
         <h2>Pfad 1: Hotspot mit BlueStation</h2>
-        <p>Das ist der einfachste Einstieg. Du brauchst keinen eigenen Server, kein Federation-Setup — nur eine BlueStation die sich mit einem bestehenden FreeTetra-Server verbindet.</p>
+        <p>Der einfachste Einstieg. Du brauchst keinen eigenen Server — nur eine BlueStation die sich mit <code>freetetra.de</code> verbindet.</p>
 
         <h3>Hardware</h3>
         <ul>
             <li><strong>Raspberry Pi</strong> (3B+ oder neuer)</li>
-            <li><strong>SX1255-HAT</strong> — z.B. TetroPi oder SXceiver (OH2EAT)</li>
+            <li><strong>SX1255-Funkboard</strong> als RPi-HAT — es gibt mehrere offene Designs (TetroPi, SXceiver von OH2EAT, weitere in der Community)</li>
             <li><strong>UHF-Antenne</strong> (fuer Hotspot reicht eine kleine Stub-Antenne)</li>
             <li>SD-Karte, Stromversorgung, ggf. Gehaeuse</li>
         </ul>
+        <p style="font-size:0.88rem">Boards bekommt man entweder fix und fertig <strong>in der BlueStation-Telegram-Gruppe</strong> (dort handeln Bastler gebrauchte und neue) oder man laesst sich die offenen Designs bei <strong>JLCPCB</strong> selbst fertigen.</p>
+
+        <h3>Software</h3>
+        <p><strong>BlueStation</strong> von <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">MidnightBlueLabs</a> (Apache 2.0). Ein Hotspot-User braucht <strong>nichts extra</strong> — kein Fork, kein Build-System-Magic. Pre-Built Binaries oder selbst kompilieren wie im README beschrieben.</p>
 
         <h3>Account: RadioID</h3>
         <p>Du brauchst eine <a href="https://radioid.net">RadioID</a> (= DMR-ID). Wenn du noch keine hast: dort registrieren mit deinem Funkamateur-Rufzeichen. Dauert 1-2 Tage. Deine ISSI fuer TETRA ist die <code>RadioID + 2 Stellen SSID</code> (z.B. <code>2623563</code> + <code>00</code> = <code>262356300</code>).</p>
 
-        <h3>Software</h3>
-        <p>Du brauchst <strong>nur das Original</strong> <a href="https://github.com/MidnightBlueLabs/tetra-bluestation">BlueStation</a> von MidnightBlueLabs (Apache 2.0). Unser FreeTetra-Fork ist nur fuer Spezialfaelle (Multi-Brew, Bot-Services) noetig.</p>
-
         <h3>Config — Brew-Host eintragen</h3>
         <p>In deiner <code>config.toml</code> nur diese Section anpassen:</p>
         <pre>[brew]
-host = "{{HOST}}"
+host = "freetetra.de"
 port = 443
 tls = true
 username = DEINE_ISSI         # z.B. 262356300
@@ -164,16 +165,18 @@ password = "blafablafa"       # Shared Key fuer alle RadioID-User
 mcc = 901
 mnc = 8888</pre>
         <p>Plus SDR-Frequenzen + Cell-Info wie in der BlueStation-Doku. Beim Start meldet sich dein Funkgeraet automatisch an — keine Account-Registrierung noetig, RadioID wird gegen radioid.net verifiziert.</p>
-
-        <div class="warn">
-            <strong>Welchen Server eintragen?</strong> <code>{{HOST}}</code> ist gut zum Reinkommen/Ausprobieren. Fuer regulaeren Funkbetrieb in deiner Region ist ein lokaler Cluster sinnvoller (z.B. <code>hh.freetetra.de</code> fuer Hamburg). Dort hast du lokale TGs ohne Federation-Latenz und teilst dir die Cell mit Funkern in der Naehe.
-        </div>
     </div>
 
     <div class="card">
-        <h2>Talkgroups die du wissen solltest</h2>
+        <h2>Hilfe zur BlueStation-Hardware/-Software</h2>
+        <p>Es gibt eine aktive <strong>BlueStation-Telegram-Gruppe</strong> in der Bastler, Boards anbieten, Probleme diskutieren und Setup-Fragen beantworten. Den Einladungslink findest du im MidnightBlueLabs-Repo bzw. ueber die Community.</p>
+        <p>Fuer FreeTetra-spezifische Fragen (Server-Connect, TG-Schema): siehe Kontakt unten.</p>
+    </div>
+
+    <div class="card">
+        <h2>Talkgroups</h2>
         <pre>TG 1-9      Lokal (nur dein Server, nie foederiert)
-            -> Echo bei TG 9 (wenn dein Server einen anbietet)
+            -> Echo bei TG 9
 
 TG 10-90    FreeTetra global (alle FreeTetra-Server)
 
@@ -181,37 +184,36 @@ TG 91+      BrandMeister-Kompatibilitaet (DMR-Bridge)
             -> TG 262   = DL
             -> TG 2621  = DL Cluster Nord
             -> TG 1     = Welt</pre>
-        <p>Mehr Details findest du auf der <a href="/">Startseite</a>.</p>
+        <p>Mehr Details auf der <a href="/">Startseite</a>.</p>
     </div>
 
     <div class="card">
         <h2>Pfad 2: Relais-Betreiber</h2>
-        <p>Gleicher Stack wie Hotspot, aber:</p>
+        <p>Gleicher Software-Stack, aber:</p>
         <ul>
             <li>Hoehere TX-Power via PA (typisch 10-50W)</li>
             <li>Externe Antenne auf Mast/Dach</li>
-            <li><strong>BNetzA-Genehmigung</strong> als Repeater-Standort + Relais-Rufzeichen (z.B. <code>DB0...</code>)</li>
-            <li>Unser <strong>FreeTetra-Fork</strong> empfohlen wegen Home-Mode-Display (Lauftext mit Repeater-Name im Funkgeraet-Display) und Multi-Brew (mehrere Cluster gleichzeitig)</li>
+            <li><strong>BNetzA-Genehmigung</strong> als Repeater-Standort + Relais-Rufzeichen</li>
         </ul>
         <p>Bei Interesse: melde dich, dann besprechen wir das im Detail.</p>
     </div>
 
     <div class="card">
-        <h2>Pfad 3: Eigener Server (OV/Notfunk/Verein)</h2>
-        <p>Wenn deine Gruppe einen eigenen lokalen Cluster will (z.B. Hamburger OV, ein Notfunk-Team, ein Verein): du betreibst einen FreeTetra-Server, deine BlueStations connecten dort, ihr peert mit <code>{{HOST}}</code> und anderen FreeTetra-Servern.</p>
+        <h2>Pfad 3: Eigener Server</h2>
+        <p>Wenn deine Gruppe (OV, Verein, Bastelrunde) einen eigenen lokalen Cluster will: du betreibst einen FreeTetra-Server, deine BlueStations connecten dort, ihr peert mit <code>freetetra.de</code> und anderen FreeTetra-Servern.</p>
         <p>Was du brauchst:</p>
         <ul>
-            <li>Linux-VM oder kleiner Server (1 vCPU, 512MB RAM reicht)</li>
-            <li>Domain mit SSL (z.B. <code>freetetra-bremen.de</code> oder <code>tetra.deinverein.de</code>)</li>
-            <li>FreeTetra-Server-Software (kommt auf <a href="https://github.com/dirkforpresident/freetetra">GitHub</a> sobald wir stabil sind)</li>
+            <li>Linux-VM oder kleiner Server (1 vCPU, 512 MB RAM reicht)</li>
+            <li>Domain mit SSL</li>
+            <li>FreeTetra-Server-Software (Go-Binary; das Repo wird oeffentlich sobald wir stabil sind)</li>
             <li>Federation-Peer-Setup mit Shared Key</li>
         </ul>
-        <p>Bei Interesse: melde dich. Wir schicken dir Setup-Anleitung + Federation-Key.</p>
+        <p>Bei Interesse: melde dich. Setup-Anleitung + Federation-Key gibt es per Mail.</p>
     </div>
 
     <div class="card">
-        <h2>Hilfe + Kontakt</h2>
-        <p>FreeTetra ist im Aufbau. Wenn was nicht geht, du Fragen hast oder mitbasteln willst: <a href="mailto:dirkforpresident@gmail.com">dirkforpresident@gmail.com</a></p>
+        <h2>Kontakt</h2>
+        <p>FreeTetra ist im Aufbau. Fuer Fragen, Mitmachen, oder Setup-Hilfe: <a href="mailto:do1xx@pm.me">do1xx@pm.me</a></p>
     </div>
 
     <div class="footer">
