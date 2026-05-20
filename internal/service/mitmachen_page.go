@@ -109,19 +109,12 @@ pre {
     </div>
 
     <div class="card">
-        <h2>Drei Wege</h2>
+        <h2>Zwei Wege</h2>
         <div class="path">
             <div class="path-icon">📡</div>
             <div>
                 <div class="path-name">Als User mit eigenem Hotspot</div>
                 <div class="path-desc">Eine kleine BlueStation zu Hause, fuer dich + dein Funkgeraet. Haeufigster Fall.</div>
-            </div>
-        </div>
-        <div class="path">
-            <div class="path-icon">🗼</div>
-            <div>
-                <div class="path-name">Als Relais-Betreiber</div>
-                <div class="path-desc">Hoehere Power, externe Antenne, BNetzA-Repeater-Genehmigung.</div>
             </div>
         </div>
         <div class="path">
@@ -188,18 +181,7 @@ TG 91+      BrandMeister-Kompatibilitaet (DMR-Bridge)
     </div>
 
     <div class="card">
-        <h2>Pfad 2: Relais-Betreiber</h2>
-        <p>Gleicher Software-Stack, aber:</p>
-        <ul>
-            <li>Hoehere TX-Power via PA (typisch 10-50W)</li>
-            <li>Externe Antenne auf Mast/Dach</li>
-            <li><strong>BNetzA-Genehmigung</strong> als Repeater-Standort + Relais-Rufzeichen</li>
-        </ul>
-        <p>Bei Interesse: melde dich, dann besprechen wir das im Detail.</p>
-    </div>
-
-    <div class="card">
-        <h2>Pfad 3: Eigener Server</h2>
+        <h2>Pfad 2: Eigener Server</h2>
         <p>Wenn deine Gruppe (OV, Verein, Bastelrunde) einen eigenen lokalen Cluster will: du betreibst einen FreeTetra-Server, deine BlueStations connecten dort, ihr peert mit <code>freetetra.de</code> und anderen FreeTetra-Servern.</p>
         <p>Was du brauchst:</p>
         <ul>
