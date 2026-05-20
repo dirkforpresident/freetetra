@@ -31,7 +31,7 @@ type Config struct {
 
 type OperatorConfig struct {
 	Name        string // z.B. "DO1XX"
-	Contact     string // z.B. "dirkforpresident@gmail.com" oder Matrix-Handle
+	Contact     string // e.g. "you@example.com" or Matrix handle
 	Description string // freie Beschreibung dieses Servers/Clusters
 }
 
