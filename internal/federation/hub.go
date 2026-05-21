@@ -179,9 +179,13 @@ func (h *Hub) HandleIncoming(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildHello konstruiert eine Hello-Message. Wenn UDP-Voice aktiv ist,
-// generiert es einen frischen pro-Peer-Token und nimmt den + unsere
-// UDP-Adresse mit auf, sodass der Peer voice-frames per UDP zu uns
-// schicken kann.
+// nimmt es einen stabilen pro-Peer-Token + unsere UDP-Adresse mit auf,
+// sodass der Peer voice-frames per UDP zu uns schicken kann.
+//
+// WICHTIG: Token muss STABIL pro Peer-Name bleiben (nicht bei jedem
+// Hello neu generieren). Sonst Race: outgoing + incoming Connection
+// gleichzeitig schreiben verschiedene Tokens, Sender und Receiver sind
+// out-of-sync → Pakete werden silent verworfen.
 func (h *Hub) buildHello(peerName string) *Message {
 	msg := &Message{
 		Type:    MsgHello,
@@ -189,9 +193,12 @@ func (h *Hub) buildHello(peerName string) *Message {
 		Version: ProtocolVersion,
 	}
 	if h.udpVoice != nil && h.udpVoice.Advertised() != "" {
-		token := NewToken()
 		h.udpInTokenMu.Lock()
-		h.udpInTokens[peerName] = token
+		token := h.udpInTokens[peerName]
+		if token == "" {
+			token = NewToken()
+			h.udpInTokens[peerName] = token
+		}
 		h.udpInTokenMu.Unlock()
 		msg.UDPAddr = h.udpVoice.Advertised()
 		msg.UDPToken = token
