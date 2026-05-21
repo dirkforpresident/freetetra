@@ -33,7 +33,7 @@ page, live view, map, and a setup guide for new operators are public.
 ## Quick start
 
 ```bash
-git clone https://github.com/freetetra/freetetra.git
+git clone https://github.com/dirkforpresident/freetetra.git
 cd freetetra
 go build -o freetetra ./cmd/tetra-brew
 cp .env.example .env
@@ -241,8 +241,8 @@ Run alongside FreeTetra (typically on the Pi next to a BlueStation):
 
 | Repo | Purpose |
 |---|---|
-| [`freetetra-agent`](https://github.com/freetetra/freetetra-agent) | Station registration daemon. Small PIN-protected web UI to declare callsign, position, frequencies. Pushes to `/api/stations/push`. |
-| [`freetetra-lip-aprs`](https://github.com/freetetra/freetetra-lip-aprs) | LIP → APRS bridge. Reads BlueStation journal, extracts individual LIP position SDS (e.g. on TG 262999), pushes to the server which forwards to APRS-IS. |
+| [`freetetra-agent`](https://github.com/dirkforpresident/freetetra-agent) | Station registration daemon. Small PIN-protected web UI to declare callsign, position, frequencies. Pushes to `/api/stations/push`. |
+| [`freetetra-lip-aprs`](https://github.com/dirkforpresident/freetetra-lip-aprs) | LIP → APRS bridge. Reads BlueStation journal, extracts individual LIP position SDS (e.g. on TG 262999), pushes to the server which forwards to APRS-IS. |
 
 ## Contributing
 

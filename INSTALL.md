@@ -17,7 +17,7 @@ sudo apt install -y nginx certbot python3-certbot-nginx golang-go git build-esse
 ## 1. Build
 
 ```bash
-git clone https://github.com/freetetra/freetetra.git /opt/freetetra/src
+git clone https://github.com/dirkforpresident/freetetra.git /opt/freetetra/src
 cd /opt/freetetra/src
 go build -o /opt/freetetra/freetetra ./cmd/tetra-brew
 
