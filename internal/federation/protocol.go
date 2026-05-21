@@ -35,6 +35,13 @@ type Message struct {
 	Origin  string `json:"origin"`  // Server name that originated this message
 	Version int    `json:"version,omitempty"`
 
+	// UDP-Voice-Plane handshake (sent in Hello):
+	//   UDPAddr  = sender's public UDP address ("host:port")
+	//   UDPToken = sender's expected incoming token — the receiver
+	//              MUST put this token in outbound voice packets to us.
+	UDPAddr  string `json:"udp_addr,omitempty"`
+	UDPToken string `json:"udp_token,omitempty"`
+
 	// Mesh relay fields
 	MsgID string   `json:"msg_id,omitempty"` // Unique message ID for deduplication
 	TTL   int      `json:"ttl,omitempty"`    // Hops remaining (decremented at each relay)

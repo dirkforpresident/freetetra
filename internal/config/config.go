@@ -87,6 +87,11 @@ type FederationConfig struct {
 	Key     string   // Shared key for peer authentication
 	Peers   []string // Peer URLs (wss://...)
 	SelfURL string   // Our own URL for advertising to peers (gossip)
+
+	// UDP-Voice-Plane: Voice-Frames werden ueber UDP statt WS-TCP
+	// uebertragen — vermeidet TCP-head-of-line-blocking + Audio-Schleppe.
+	UDPPort    int    // local UDP listen port (0 = disabled)
+	UDPAdvAddr string // public UDP address "host:port" advertised to peers
 }
 
 type ServerConfig struct {
@@ -333,11 +338,13 @@ func LoadFromEnv() (Config, error) {
 			InboundDefaultISSI: uint32(envInt("SIP_INBOUND_DEFAULT_ISSI", 0)),
 		},
 		Federation: FederationConfig{
-			Enabled: envBool("FEDERATION_ENABLED", false),
-			Name:    env("FEDERATION_NAME", ""),
-			Key:     env("FEDERATION_KEY", ""),
-			Peers:   envCSV("FEDERATION_PEERS"),
-			SelfURL: env("FEDERATION_SELF_URL", ""),
+			Enabled:    envBool("FEDERATION_ENABLED", false),
+			Name:       env("FEDERATION_NAME", ""),
+			Key:        env("FEDERATION_KEY", ""),
+			Peers:      envCSV("FEDERATION_PEERS"),
+			SelfURL:    env("FEDERATION_SELF_URL", ""),
+			UDPPort:    envInt("FEDERATION_UDP_PORT", 0),
+			UDPAdvAddr: env("FEDERATION_UDP_ADV_ADDR", ""),
 		},
 		Operator: OperatorConfig{
 			Name:        env("OPERATOR_NAME", ""),

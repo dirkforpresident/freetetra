@@ -81,6 +81,16 @@ type Hub struct {
 	upgrader websocket.Upgrader
 
 	ctx context.Context
+
+	// UDP-Voice-Plane (optional, nil wenn disabled). Voice-Frames laufen
+	// dann ueber UDP statt im TCP-WS-Stream.
+	udpVoice *UDPVoice
+
+	// Outbound tokens: pro Peer der token den WIR von ihm in eingehenden
+	// UDP-Voice-Packets erwarten — wird beim Hello-Send generiert + an den
+	// Peer geschickt. Empfang validiert ueber UDPVoice.byToken.
+	udpInTokenMu sync.RWMutex
+	udpInTokens  map[string]string // peerName -> hex token (was wir von ihm erwarten)
 }
 
 // NewHub creates a new federation hub.
@@ -94,6 +104,7 @@ func NewHub(serverName, peerKey, selfURL string, handler CallHandler, logger *lo
 		peers:       make(map[string]*Peer),
 		activeCalls: make(map[string]map[string]bool),
 		knownPeers:  make(map[string]string),
+		udpInTokens: make(map[string]string),
 		mesh:        newMeshRouter(serverName),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
@@ -101,6 +112,22 @@ func NewHub(serverName, peerKey, selfURL string, handler CallHandler, logger *lo
 			CheckOrigin:     func(r *http.Request) bool { return true },
 		},
 	}
+}
+
+// EnableUDPVoice initialisiert die UDP-Voice-Plane. udpPort=0 = disabled.
+// advertised ist die "host:port"-Adresse die Peers in unserem Hello sehen
+// (oeffentliche Adresse).
+func (h *Hub) EnableUDPVoice(udpPort int, advertised string) error {
+	uv, err := NewUDPVoice(udpPort, advertised, h.logger, func(peerName, callUUID string, frameData []byte) {
+		if h.handler != nil {
+			h.handler.OnPeerVoiceFrame(peerName, callUUID, frameData)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	h.udpVoice = uv
+	return nil
 }
 
 // Start connects to all configured peers and begins the federation loop.
@@ -141,18 +168,35 @@ func (h *Hub) HandleIncoming(w http.ResponseWriter, r *http.Request) {
 	h.registerPeer(peer)
 	h.logger.Printf("federation: accepted incoming peer %s", peerName)
 
-	// Send hello
-	peer.SendJSON(&Message{
-		Type:    MsgHello,
-		Origin:  h.serverName,
-		Version: ProtocolVersion,
-	})
+	// Send hello (mit UDP-Voice-Handshake falls UDP aktiviert)
+	peer.SendJSON(h.buildHello(peerName))
 
 	// Send full sync
 	h.sendFullSync(peer)
 
 	go peer.writeLoop()
 	h.readLoop(peer)
+}
+
+// buildHello konstruiert eine Hello-Message. Wenn UDP-Voice aktiv ist,
+// generiert es einen frischen pro-Peer-Token und nimmt den + unsere
+// UDP-Adresse mit auf, sodass der Peer voice-frames per UDP zu uns
+// schicken kann.
+func (h *Hub) buildHello(peerName string) *Message {
+	msg := &Message{
+		Type:    MsgHello,
+		Origin:  h.serverName,
+		Version: ProtocolVersion,
+	}
+	if h.udpVoice != nil && h.udpVoice.Advertised() != "" {
+		token := NewToken()
+		h.udpInTokenMu.Lock()
+		h.udpInTokens[peerName] = token
+		h.udpInTokenMu.Unlock()
+		msg.UDPAddr = h.udpVoice.Advertised()
+		msg.UDPToken = token
+	}
+	return msg
 }
 
 // maintainOutgoingPeer keeps a persistent connection to an outgoing peer.
@@ -185,11 +229,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		h.registerPeer(peer)
 		h.logger.Printf("federation: connected to %s", pc.Name)
 
-		peer.SendJSON(&Message{
-			Type:    MsgHello,
-			Origin:  h.serverName,
-			Version: ProtocolVersion,
-		})
+		peer.SendJSON(h.buildHello(pc.Name))
 		h.sendFullSync(peer)
 
 		go peer.writeLoop()
@@ -267,6 +307,29 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 			h.renamePeer(peer, msg.Origin)
 			h.logger.Printf("federation: renamed peer %s -> %s", old, msg.Origin)
 		}
+
+		// UDP-Voice-Handshake: wenn der Peer eine UDP-Adresse + Token sendet,
+		// koennen wir Voice-Frames per UDP zu ihm schicken. Plus wir kennen
+		// jetzt unser eigenes outbound-token fuer diesen Peer (= was wir
+		// erwarten wenn er an uns sendet) — das hatten wir im buildHello
+		// generiert und gespeichert.
+		if h.udpVoice != nil && msg.UDPAddr != "" && msg.UDPToken != "" {
+			h.udpInTokenMu.RLock()
+			myInToken := h.udpInTokens[peer.Name]
+			h.udpInTokenMu.RUnlock()
+			if myInToken == "" {
+				// Reconnect zwischen incoming/outgoing — generieren neu.
+				myInToken = NewToken()
+				h.udpInTokenMu.Lock()
+				h.udpInTokens[peer.Name] = myInToken
+				h.udpInTokenMu.Unlock()
+			}
+			// Wir registrieren: zum Senden an peer → msg.UDPAddr + msg.UDPToken.
+			// Zum Empfangen von peer → myInToken (was wir ihm via unser Hello
+			// sagen wird).
+			h.udpVoice.RegisterPeer(peer.Name, msg.UDPAddr, msg.UDPToken, myInToken)
+		}
+
 		h.sendPeerExchange(peer)
 		h.sendUsersDBOffer(peer)
 
@@ -551,14 +614,21 @@ func (h *Hub) BroadcastCallEnd(callUUID string, cause uint8) {
 	h.broadcastToAllPeers(msg)
 }
 
-// BroadcastVoiceFrame sends a voice frame to all connected peers (mesh relay).
+// BroadcastVoiceFrame sends a voice frame to all connected peers.
+// Bevorzugt UDP (vermeidet TCP-head-of-line-blocking + Audio-Schleppe);
+// fuer Peers ohne UDP-Setup fallback auf binary WebSocket.
 func (h *Hub) BroadcastVoiceFrame(callUUID string, frameData []byte) {
-	data := append([]byte(callUUID), frameData...)
 	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for _, peer := range h.peers {
+		// Versuche UDP zuerst — keine Schleppe, niedrige Latenz.
+		if h.udpVoice != nil && h.udpVoice.SendVoice(peer.Name, callUUID, frameData) {
+			continue
+		}
+		// Fallback: binary WS (TCP).
+		data := append([]byte(callUUID), frameData...)
 		peer.SendBinary(data)
 	}
-	h.mu.RUnlock()
 }
 
 // BroadcastSDS relays an SDS message through the mesh.
@@ -803,13 +873,20 @@ func (h *Hub) unregisterPeer(peer *Peer) {
 	peer.Cleanup()
 	peer.Close()
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	for key, p := range h.peers {
 		if p == peer {
 			delete(h.peers, key)
 			break
 		}
 	}
+	h.mu.Unlock()
+	// UDP-Voice-Plane: Peer aus Token-Maps entfernen.
+	if h.udpVoice != nil {
+		h.udpVoice.UnregisterPeer(peer.Name)
+	}
+	h.udpInTokenMu.Lock()
+	delete(h.udpInTokens, peer.Name)
+	h.udpInTokenMu.Unlock()
 }
 
 func (h *Hub) getPeer(name string) *Peer {

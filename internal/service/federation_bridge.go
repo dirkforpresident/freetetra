@@ -30,6 +30,11 @@ func newFederationBridge(cfg config.Config, logger *log.Logger, svc *Service) *f
 		svc:    svc,
 	}
 	fb.hub = federation.NewHub(cfg.Federation.Name, cfg.Federation.Key, cfg.Federation.SelfURL, fb, logger)
+	if cfg.Federation.UDPPort > 0 {
+		if err := fb.hub.EnableUDPVoice(cfg.Federation.UDPPort, cfg.Federation.UDPAdvAddr); err != nil {
+			logger.Printf("federation: UDP voice disabled (%v) — falling back to TCP WS for voice", err)
+		}
+	}
 	return fb
 }
 
