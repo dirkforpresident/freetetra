@@ -184,6 +184,7 @@ func (uv *UDPVoice) Peers() []string {
 
 func (uv *UDPVoice) readLoop(handler VoiceHandler) {
 	buf := make([]byte, 1500)
+	unknownTokenCount := 0
 	for {
 		n, src, err := uv.conn.ReadFromUDP(buf)
 		if err != nil {
@@ -199,10 +200,14 @@ func (uv *UDPVoice) readLoop(handler VoiceHandler) {
 		token := buf[:udpTokenLen]
 		uv.tokensMu.RLock()
 		peerName, ok := uv.byToken[hex.EncodeToString(token)]
+		knownTokens := len(uv.byToken)
 		uv.tokensMu.RUnlock()
 		if !ok {
-			// Spoofing-Versuch oder veralteter Token — silently drop
-			_ = src
+			unknownTokenCount++
+			if unknownTokenCount <= 3 || unknownTokenCount%50 == 0 {
+				uv.logger.Printf("federation: UDP unknown-token packet from %s (token=%s, known_tokens=%d, drop count=%d)",
+					src.String(), hex.EncodeToString(token)[:8], knownTokens, unknownTokenCount)
+			}
 			continue
 		}
 		callUUID := string(buf[udpTokenLen : udpTokenLen+udpUUIDLen])
