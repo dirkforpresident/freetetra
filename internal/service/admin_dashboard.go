@@ -258,7 +258,7 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 <div class="card">
     <h2>{{T:admin.repeater}} <span class="count" id="repeater-count">0</span></h2>
     <div class="table-wrap"><table>
-        <thead><tr><th>{{T:admin.col.name}}</th><th>{{T:admin.subscriber}}</th><th>{{T:admin.col.ip}}</th><th>{{T:admin.col.last_act}}</th></tr></thead>
+        <thead><tr><th>{{T:admin.col.callsign}}</th><th>{{T:admin.col.status}}</th><th>{{T:admin.col.type}}</th><th>{{T:admin.col.last_act}}</th></tr></thead>
         <tbody id="repeaters-body"></tbody>
     </table></div>
     <div id="repeaters-empty" class="empty">{{T:admin.empty.repeaters}}</div>
@@ -321,12 +321,13 @@ function fmtDate(ts) {
 
 async function update() {
     try {
-        const [publicStatus, telemetry, peers, positions, snapshot] = await Promise.all([
+        const [publicStatus, telemetry, peers, positions, snapshot, stationsResp] = await Promise.all([
             fetch("/api/public/status").then(r => r.json()),
             fetch("/api/telemetry/clients").then(r => r.ok ? r.json() : {clients:[]}),
             fetch("/api/peers").then(r => r.ok ? r.json() : {peers:[]}).catch(() => ({peers:[]})),
             fetch("/api/positions").then(r => r.ok ? r.json() : {positions:[]}),
             fetch("/api/dashboard/snapshot").then(r => r.ok ? r.json() : {subscribers:[],groups:[]}).catch(() => ({subscribers:[],groups:[]})),
+            fetch("/api/stations").then(r => r.ok ? r.json() : {stations:[]}).catch(() => ({stations:[]})),
         ]);
 
         document.getElementById("server-name").textContent = publicStatus.server || "FreeTetra";
@@ -335,21 +336,32 @@ async function update() {
         document.getElementById("s-peers").textContent = peers.count || (peers.peers || []).length || 0;
         document.getElementById("s-positions").textContent = publicStatus.positions || 0;
 
-        // Repeaters
-        const reps = telemetry.clients || [];
-        document.getElementById("repeater-count").textContent = "(" + reps.length + ")";
+        // Repeaters/Stations — aus stationStore (Quelle der Wahrheit fuer
+        // Station-Identitaet DO0RAM/DB0WL/...). Telemetry-Client (Brew-Login)
+        // ist das Funkamateur-Callsign und gehoert in die Subscribers-Tabelle.
+        const stations = (stationsResp.stations || []).slice().sort((a, b) => {
+            // Online zuerst, dann nach last_seen absteigend
+            if ((b.online ? 1 : 0) !== (a.online ? 1 : 0)) return (b.online ? 1 : 0) - (a.online ? 1 : 0);
+            return (b.last_seen || 0) - (a.last_seen || 0);
+        });
+        document.getElementById("repeater-count").textContent = "(" + stations.length + ")";
         const rbody = document.getElementById("repeaters-body");
         const rempty = document.getElementById("repeaters-empty");
-        if (reps.length === 0) {
+        if (stations.length === 0) {
             rbody.innerHTML = ""; rempty.style.display = "block";
         } else {
             rempty.style.display = "none";
-            rbody.innerHTML = reps.map(r =>
-                "<tr><td><span class=\"badge badge-green\">" + r.name + "</span></td>" +
-                "<td class=\"mono\">" + r.subscriber_count + "</td>" +
-                "<td class=\"mono\" style=\"color:var(--text-muted)\">" + (r.ip || "-") + "</td>" +
-                "<td style=\"color:var(--text-muted)\">" + fmt(r.last_activity) + "</td></tr>"
-            ).join("");
+            rbody.innerHTML = stations.map(st => {
+                const statusBadge = st.online
+                    ? '<span class="badge badge-green">online</span>'
+                    : '<span class="badge badge-gray">offline</span>';
+                const lastSeenDate = st.last_seen ? new Date(st.last_seen * 1000).toLocaleString() : "—";
+                const notes = st.notes ? '<span style="color:var(--text-muted);font-size:0.85rem"> — ' + st.notes + '</span>' : "";
+                return "<tr><td><span class=\"badge badge-green\">" + st.callsign + "</span>" + notes + "</td>" +
+                    "<td>" + statusBadge + "</td>" +
+                    "<td class=\"mono\" style=\"color:var(--text-muted);font-size:0.82rem\">" + (st.type || "—") + "</td>" +
+                    "<td style=\"color:var(--text-muted)\">" + lastSeenDate + "</td></tr>";
+            }).join("");
         }
 
         // Subscribers — local from dashboard-snapshot, remote from peers.

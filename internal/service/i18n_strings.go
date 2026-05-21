@@ -121,6 +121,8 @@ var translations = map[Lang]map[string]string{
 		"admin.col.tg":            "Talkgroup",
 		"admin.col.count":         "Anzahl",
 		"admin.col.subs":          "Teilnehmer",
+		"admin.col.status":        "Status",
+		"admin.col.type":          "Typ",
 
 		// Mitmachen
 		"join.title":           "Mitmachen",
@@ -285,6 +287,8 @@ var translations = map[Lang]map[string]string{
 		"admin.col.tg":            "Talkgroup",
 		"admin.col.count":         "Count",
 		"admin.col.subs":          "Subscribers",
+		"admin.col.status":        "Status",
+		"admin.col.type":          "Type",
 
 		// Mitmachen
 		"join.title":           "Join",
