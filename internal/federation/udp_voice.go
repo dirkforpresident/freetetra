@@ -119,7 +119,8 @@ func (uv *UDPVoice) RegisterPeer(peerName, remoteUDP string, peerInTokenHex, pee
 	uv.byToken[hex.EncodeToString(outToken)] = peerName
 	uv.tokensMu.Unlock()
 
-	uv.logger.Printf("federation: UDP peer registered name=%s addr=%s", peerName, remoteUDP)
+	uv.logger.Printf("federation: UDP peer registered name=%s addr=%s send_token=%s recv_token=%s",
+		peerName, remoteUDP, peerInTokenHex[:8], peerOutTokenHex[:8])
 }
 
 // UnregisterPeer entfernt einen Peer (z.B. bei Disconnect).
