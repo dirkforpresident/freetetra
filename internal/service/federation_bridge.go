@@ -21,6 +21,7 @@ type federationBridge struct {
 	logger *log.Logger
 	svc    *Service
 	hub    *federation.Hub
+	pacer  *audioPacer
 }
 
 func newFederationBridge(cfg config.Config, logger *log.Logger, svc *Service) *federationBridge {
@@ -28,6 +29,7 @@ func newFederationBridge(cfg config.Config, logger *log.Logger, svc *Service) *f
 		cfg:    cfg,
 		logger: logger,
 		svc:    svc,
+		pacer:  newAudioPacer(),
 	}
 	fb.hub = federation.NewHub(cfg.Federation.Name, cfg.Federation.Key, cfg.Federation.SelfURL, fb, logger)
 	return fb
@@ -136,6 +138,16 @@ func (fb *federationBridge) OnPeerCallStart(peerName string, callUUID string, so
 	if fb.svc.lastHeard != nil {
 		fb.svc.lastHeard.Start(uid, sourceISSI, destGSSI, "peer:"+peerName)
 	}
+
+	// Audio-Pacer fuer diesen Call starten. Voice-Frames werden mit 60ms-Pacing
+	// ausgespielt statt direkt durchgereicht (sonst Burst-/Schleppe-Effekt am
+	// Ende des Durchgangs).
+	gssi := destGSSI
+	fb.pacer.Start(uid, func(frameData []byte) {
+		lengthBits := uint16(len(frameData) * 8)
+		wire := brew.BuildFrame(brew.FrameTypeTrafficChannel, uid, lengthBits, frameData)
+		fb.svc.server.BroadcastToGroup(gssi, wire, "")
+	})
 }
 
 func (fb *federationBridge) OnPeerCallEnd(peerName string, callUUID string, cause uint8) {
@@ -162,6 +174,10 @@ func (fb *federationBridge) OnPeerCallEnd(peerName string, callUUID string, caus
 	if fb.svc.lastHeard != nil {
 		fb.svc.lastHeard.End(uid)
 	}
+
+	// Pacer SOFORT stoppen — sonst spielt der Worker noch bis zu
+	// pacerBufferDepth*60ms an gestauten Frames aus (= Audio-Schleppe).
+	fb.pacer.Stop(uid)
 }
 
 func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte) {
@@ -178,10 +194,10 @@ func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, f
 		return
 	}
 
-	// Reconstruct Brew FRAME_TRAFFIC and broadcast
-	lengthBits := uint16(len(frameData) * 8)
-	wire := brew.BuildFrame(brew.FrameTypeTrafficChannel, uid, lengthBits, frameData)
-	fb.svc.server.BroadcastToGroup(call.DestinationGSI, wire, "")
+	// Frame in den Pacer — der spielt im 60ms-Takt aus. Bei Burst-Empfang
+	// (TCP-Jitter) werden alte Frames automatisch gedropped (Drop-Oldest),
+	// damit die Latenz nicht aufschaukelt.
+	fb.pacer.Push(uid, frameData)
 }
 
 // OnPeerStationUpdate wird vom Federation-Hub aufgerufen, wenn ein Peer einen
