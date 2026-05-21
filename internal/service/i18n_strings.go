@@ -112,8 +112,15 @@ var translations = map[Lang]map[string]string{
 		"admin.empty.peers":       "Keine Peers verbunden",
 		"admin.empty.positions":   "Keine Positionen empfangen",
 		"admin.empty.activity":    "Keine Aktivitaet",
+		"admin.empty.tgs":         "Keine Talkgroups aktiv",
 		"admin.h.last_positions":  "Letzte Positionen",
 		"admin.h.activity":        "Aktivitaet",
+		"admin.h.talkgroups":      "Talkgroups",
+		"admin.col.source":        "Quelle",
+		"admin.col.gssis":         "Eingebuchte GSSIs",
+		"admin.col.tg":            "Talkgroup",
+		"admin.col.count":         "Anzahl",
+		"admin.col.subs":          "Teilnehmer",
 
 		// Mitmachen
 		"join.title":           "Mitmachen",
@@ -269,8 +276,15 @@ var translations = map[Lang]map[string]string{
 		"admin.empty.peers":       "No peers connected",
 		"admin.empty.positions":   "No positions received",
 		"admin.empty.activity":    "No activity",
+		"admin.empty.tgs":         "No active talkgroups",
 		"admin.h.last_positions":  "Last positions",
 		"admin.h.activity":        "Activity",
+		"admin.h.talkgroups":      "Talkgroups",
+		"admin.col.source":        "Source",
+		"admin.col.gssis":         "Affiliated GSSIs",
+		"admin.col.tg":            "Talkgroup",
+		"admin.col.count":         "Count",
+		"admin.col.subs":          "Subscribers",
 
 		// Mitmachen
 		"join.title":           "Join",

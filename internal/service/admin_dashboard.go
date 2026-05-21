@@ -267,10 +267,19 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 <div class="card">
     <h2>{{T:admin.subscriber}} <span class="count" id="subs-count">0</span></h2>
     <div class="table-wrap"><table>
-        <thead><tr><th>{{T:admin.col.issi}}</th><th>{{T:admin.col.callsign}}</th><th>{{T:admin.repeater}}</th></tr></thead>
+        <thead><tr><th>{{T:admin.col.issi}}</th><th>{{T:admin.col.callsign}}</th><th>{{T:admin.col.source}}</th><th>{{T:admin.col.gssis}}</th></tr></thead>
         <tbody id="subs-body"></tbody>
     </table></div>
     <div id="subs-empty" class="empty">{{T:admin.empty.subs}}</div>
+</div>
+
+<div class="card">
+    <h2>{{T:admin.h.talkgroups}} <span class="count" id="tg-count">0</span></h2>
+    <div class="table-wrap"><table>
+        <thead><tr><th>{{T:admin.col.tg}}</th><th>{{T:admin.col.count}}</th><th>{{T:admin.col.subs}}</th></tr></thead>
+        <tbody id="tg-body"></tbody>
+    </table></div>
+    <div id="tg-empty" class="empty">{{T:admin.empty.tgs}}</div>
 </div>
 
 <div class="card">
@@ -312,11 +321,12 @@ function fmtDate(ts) {
 
 async function update() {
     try {
-        const [publicStatus, telemetry, peers, positions] = await Promise.all([
+        const [publicStatus, telemetry, peers, positions, snapshot] = await Promise.all([
             fetch("/api/public/status").then(r => r.json()),
             fetch("/api/telemetry/clients").then(r => r.ok ? r.json() : {clients:[]}),
             fetch("/api/peers").then(r => r.ok ? r.json() : {peers:[]}).catch(() => ({peers:[]})),
             fetch("/api/positions").then(r => r.ok ? r.json() : {positions:[]}),
+            fetch("/api/dashboard/snapshot").then(r => r.ok ? r.json() : {subscribers:[],groups:[]}).catch(() => ({subscribers:[],groups:[]})),
         ]);
 
         document.getElementById("server-name").textContent = publicStatus.server || "FreeTetra";
@@ -342,13 +352,25 @@ async function update() {
             ).join("");
         }
 
-        // Subscribers (flattened from all repeaters)
-        const allSubs = [];
-        for (const r of reps) {
-            for (const issi of (r.subscribers || [])) {
-                allSubs.push({ issi: issi, repeater: r.name });
+        // Subscribers — local from dashboard-snapshot, remote from peers.
+        // Each entry: { issi, source, gssis[] }
+        const subsByIssi = new Map();
+        for (const s of (snapshot.subscribers || [])) {
+            subsByIssi.set(s.issi, { issi: s.issi, source: "local", gssis: s.groups || [] });
+        }
+        for (const p of (peers.peers || [])) {
+            if (p.direction !== "outgoing") continue;
+            for (const issi of (p.issis || [])) {
+                if (subsByIssi.has(issi)) continue; // local wins
+                const gssis = [];
+                for (const [g, members] of Object.entries(p.gssis || {})) {
+                    if ((members || []).includes(issi)) gssis.push(parseInt(g, 10));
+                }
+                subsByIssi.set(issi, { issi, source: p.name, gssis });
             }
         }
+        const allSubs = Array.from(subsByIssi.values()).sort((a, b) => a.issi - b.issi);
+
         document.getElementById("subs-count").textContent = "(" + allSubs.length + ")";
         const sbody = document.getElementById("subs-body");
         const sempty = document.getElementById("subs-empty");
@@ -356,11 +378,18 @@ async function update() {
             sbody.innerHTML = ""; sempty.style.display = "block";
         } else {
             sempty.style.display = "none";
-            sbody.innerHTML = allSubs.map(s =>
-                "<tr><td class=\"mono\">" + s.issi + "</td>" +
-                "<td style=\"color:var(--text-muted)\" id=\"call-" + s.issi + "\">...</td>" +
-                "<td><span class=\"badge badge-green\">" + s.repeater + "</span></td></tr>"
-            ).join("");
+            sbody.innerHTML = allSubs.map(s => {
+                const sourceBadge = s.source === "local"
+                    ? '<span class="badge badge-green">local</span>'
+                    : '<span class="badge badge-blue">' + s.source + '</span>';
+                const gssiBadges = s.gssis.length
+                    ? s.gssis.sort((a,b)=>a-b).map(g => '<span class="badge badge-gray">TG ' + g + '</span>').join(" ")
+                    : '<span style="color:var(--text-muted)">—</span>';
+                return "<tr><td class=\"mono\">" + s.issi + "</td>" +
+                    "<td style=\"color:var(--text-muted)\" id=\"call-" + s.issi + "\">...</td>" +
+                    "<td>" + sourceBadge + "</td>" +
+                    "<td>" + gssiBadges + "</td></tr>";
+            }).join("");
             // Resolve callsigns
             for (const s of allSubs) {
                 fetch("/api/radioid/lookup?issi=" + s.issi)
@@ -371,6 +400,31 @@ async function update() {
                             if (el) el.textContent = d.callsign;
                         }
                     }).catch(() => {});
+            }
+        }
+
+        // Talkgroups — wer ist auf welcher TG (lokal + peer aggregiert)
+        const tgMap = new Map();
+        for (const s of allSubs) {
+            for (const g of s.gssis) {
+                if (!tgMap.has(g)) tgMap.set(g, []);
+                tgMap.get(g).push(s.issi);
+            }
+        }
+        const tgList = Array.from(tgMap.entries()).sort((a, b) => a[0] - b[0]);
+        const tgEl = document.getElementById("tg-body");
+        const tgEmpty = document.getElementById("tg-empty");
+        if (tgEl) {
+            document.getElementById("tg-count").textContent = "(" + tgList.length + ")";
+            if (tgList.length === 0) {
+                tgEl.innerHTML = ""; if (tgEmpty) tgEmpty.style.display = "block";
+            } else {
+                if (tgEmpty) tgEmpty.style.display = "none";
+                tgEl.innerHTML = tgList.map(([g, issis]) =>
+                    "<tr><td class=\"mono\" style=\"color:#2563eb;font-weight:600\">TG " + g + "</td>" +
+                    "<td class=\"mono\">" + issis.length + "</td>" +
+                    "<td>" + issis.map(i => '<span class="badge badge-gray mono" style="font-size:0.72rem">' + i + '</span>').join(" ") + "</td></tr>"
+                ).join("");
             }
         }
 
