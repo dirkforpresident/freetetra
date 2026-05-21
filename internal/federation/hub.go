@@ -867,6 +867,19 @@ func (h *Hub) renamePeer(peer *Peer, newName string) {
 		}
 	}
 	h.knownMu.Unlock()
+
+	// UDP-Token-Cache: vorher hatten wir den Token unter "peer-0" gecached,
+	// jetzt muss er unter dem echten Namen ("freetetra.de" / "HH-Cluster")
+	// gefunden werden, sonst generiert das naechste buildHello einen neuen
+	// Token und der Sender sendet mit altem, der Receiver erwartet neuen.
+	h.udpInTokenMu.Lock()
+	if tok, ok := h.udpInTokens[oldName]; ok {
+		delete(h.udpInTokens, oldName)
+		if _, exists := h.udpInTokens[newName]; !exists {
+			h.udpInTokens[newName] = tok
+		}
+	}
+	h.udpInTokenMu.Unlock()
 }
 
 func peerKey(name, direction string) string {
