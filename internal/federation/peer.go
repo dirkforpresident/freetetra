@@ -73,6 +73,16 @@ func (p *Peer) RegisterISSI(issi uint32) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.issis[issi] = true
+	// Eine erneute Register-Message ist ein "atomic replace" — alte
+	// GSSI-Affiliations fuer diese ISSI fliegen raus, das nachfolgende
+	// AffiliateISSI setzt die aktuelle Liste. Sonst akkumulieren alte
+	// Scan-Listen-Eintraege ewig.
+	for gssi, members := range p.gssiAffiliations {
+		delete(members, issi)
+		if len(members) == 0 {
+			delete(p.gssiAffiliations, gssi)
+		}
+	}
 }
 
 // DeregisterISSI removes an ISSI from this peer's remote registry.
