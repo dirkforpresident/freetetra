@@ -235,6 +235,15 @@ brew install gcc
 
 All env-vars are documented in [.env.example](.env.example).
 
+## Companion tools
+
+Run alongside FreeTetra (typically on the Pi next to a BlueStation):
+
+| Repo | Purpose |
+|---|---|
+| [`freetetra-agent`](https://github.com/freetetra/freetetra-agent) | Station registration daemon. Small PIN-protected web UI to declare callsign, position, frequencies. Pushes to `/api/stations/push`. |
+| [`freetetra-lip-aprs`](https://github.com/freetetra/freetetra-lip-aprs) | LIP → APRS bridge. Reads BlueStation journal, extracts individual LIP position SDS (e.g. on TG 262999), pushes to the server which forwards to APRS-IS. |
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
