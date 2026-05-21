@@ -353,14 +353,18 @@ async function update() {
         }
 
         // Subscribers — local from dashboard-snapshot, remote from peers.
-        // Each entry: { issi, source, gssis[] }
+        // Service-ISSIs (900000-999999 = Echo, Webradio, DMR-Bridge etc.)
+        // werden ausgefiltert, sie sind keine Funker.
+        const isServiceIssi = (i) => i >= 900000 && i <= 999999;
         const subsByIssi = new Map();
         for (const s of (snapshot.subscribers || [])) {
+            if (isServiceIssi(s.issi)) continue;
             subsByIssi.set(s.issi, { issi: s.issi, source: "local", gssis: s.groups || [] });
         }
         for (const p of (peers.peers || [])) {
             if (p.direction !== "outgoing") continue;
             for (const issi of (p.issis || [])) {
+                if (isServiceIssi(issi)) continue;
                 if (subsByIssi.has(issi)) continue; // local wins
                 const gssis = [];
                 for (const [g, members] of Object.entries(p.gssis || {})) {
