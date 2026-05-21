@@ -394,12 +394,17 @@ async function update() {
             sbody.innerHTML = ""; sempty.style.display = "block";
         } else {
             sempty.style.display = "none";
+            // GSSI 1-90 = FreeTetra-GSSIs (nur Zahl), 91+ = BrandMeister/DMR
+            // ("TG"-Prefix nach klassischer DMR-Konvention).
+            const renderGssi = (g) => g >= 91
+                ? '<span class="badge" style="background:rgba(217,119,6,0.12);color:#d97706">TG ' + g + '</span>'
+                : '<span class="badge badge-gray">' + g + '</span>';
             sbody.innerHTML = allSubs.map(s => {
                 const sourceBadge = s.source === "local"
                     ? '<span class="badge badge-green">local</span>'
                     : '<span class="badge badge-blue">' + s.source + '</span>';
                 const gssiBadges = s.gssis.length
-                    ? s.gssis.sort((a,b)=>a-b).map(g => '<span class="badge badge-gray">TG ' + g + '</span>').join(" ")
+                    ? s.gssis.sort((a,b)=>a-b).map(renderGssi).join(" ")
                     : '<span style="color:var(--text-muted)">—</span>';
                 return "<tr><td class=\"mono\">" + s.issi + "</td>" +
                     "<td style=\"color:var(--text-muted)\" id=\"call-" + s.issi + "\">...</td>" +
@@ -436,11 +441,14 @@ async function update() {
                 tgEl.innerHTML = ""; if (tgEmpty) tgEmpty.style.display = "block";
             } else {
                 if (tgEmpty) tgEmpty.style.display = "none";
-                tgEl.innerHTML = tgList.map(([g, issis]) =>
-                    "<tr><td class=\"mono\" style=\"color:#2563eb;font-weight:600\">TG " + g + "</td>" +
-                    "<td class=\"mono\">" + issis.length + "</td>" +
-                    "<td>" + issis.map(i => '<span class="badge badge-gray mono" style="font-size:0.72rem">' + i + '</span>').join(" ") + "</td></tr>"
-                ).join("");
+                tgEl.innerHTML = tgList.map(([g, issis]) => {
+                    const gLabel = g >= 91
+                        ? '<span style="color:#d97706;font-weight:600">TG ' + g + '</span>'
+                        : '<span style="color:#2563eb;font-weight:600">' + g + '</span>';
+                    return "<tr><td class=\"mono\">" + gLabel + "</td>" +
+                        "<td class=\"mono\">" + issis.length + "</td>" +
+                        "<td>" + issis.map(i => '<span class="badge badge-gray mono" style="font-size:0.72rem">' + i + '</span>').join(" ") + "</td></tr>";
+                }).join("");
             }
         }
 
