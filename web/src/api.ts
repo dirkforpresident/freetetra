@@ -68,6 +68,65 @@ export interface StationsResponse {
   stations: Station[];
 }
 
+export interface PublicStatus {
+  server: string;
+  repeaters: number;
+  subscribers: number;
+  positions: number;
+}
+
+export interface Peer {
+  name: string;
+  direction: "incoming" | "outgoing";
+  issis?: number[];
+  gssis?: Record<string, number[]>;
+  count?: number;
+}
+
+export interface PeersResponse {
+  peers: Peer[];
+  count?: number;
+}
+
+export interface PositionEntry {
+  issi: number;
+  lat: number;
+  lon: number;
+  timestamp: string;
+}
+
+export interface PositionsResponse {
+  positions: PositionEntry[];
+}
+
+export interface DashboardSubscriber {
+  session: string;
+  remote: string;
+  issi: number;
+  groups: number[];
+}
+
+export interface DashboardActivity {
+  seq: number;
+  time: string;
+  kind: string;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+export interface DashboardSnapshotResponse {
+  server_time: string;
+  subscribers: DashboardSubscriber[];
+  groups?: { gssi: number; subscribers: number; sessions: number }[];
+  activity?: DashboardActivity[];
+  last_seq?: number;
+}
+
+export interface RadioIDLookupResponse {
+  callsign?: string;
+  name?: string;
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "same-origin", cache: "no-store" });
   if (!r.ok) throw new Error(path + " -> " + r.status);
@@ -76,14 +135,15 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export const api = {
   siteConfig: () => getJSON<SiteConfig>("/api/site/config"),
-  publicStatus: () => getJSON<unknown>("/api/public/status"),
+  publicStatus: () => getJSON<PublicStatus>("/api/public/status"),
   liveLastHeard: () => getJSON<LastHeardResponse>("/api/live/last-heard"),
   map: (res: number, days: number) => getJSON<MapDataResponse>(`/api/map?res=${res}&days=${days}`),
   stations: () => getJSON<StationsResponse>("/api/stations"),
-  positions: () => getJSON<unknown>("/api/positions"),
-  peers: () => getJSON<unknown>("/api/peers"),
-  telemetryClients: () => getJSON<unknown>("/api/telemetry/clients"),
+  positions: () => getJSON<PositionsResponse>("/api/positions"),
+  peers: () => getJSON<PeersResponse>("/api/peers"),
+  telemetryClients: () => getJSON<{ clients: unknown[] }>("/api/telemetry/clients"),
   dashboardSnapshot: (sinceSeq = 0) =>
-    getJSON<unknown>(`/api/dashboard/snapshot?since_seq=${sinceSeq}`),
-  radioIDLookup: (issi: number) => getJSON<unknown>(`/api/radioid/lookup?issi=${issi}`),
+    getJSON<DashboardSnapshotResponse>(`/api/dashboard/snapshot?since_seq=${sinceSeq}`),
+  radioIDLookup: (issi: number) =>
+    getJSON<RadioIDLookupResponse>(`/api/radioid/lookup?issi=${issi}`),
 };
