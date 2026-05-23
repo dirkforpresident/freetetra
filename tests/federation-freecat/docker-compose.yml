@@ -7,7 +7,7 @@ services:
     env_file:
       - .env.loopback-node
     ports:
-      - "8201:8091"
+      - "8201:8201"
       - "8202:8202"
     restart: unless-stopped
 
@@ -19,7 +19,7 @@ services:
     entrypoint: ["/app/tetra-brew-echo"]
     environment:
       BREW_MODE: echo
-      BREW_CLIENT_BASE_URL: http://loopback-node:8091
+      BREW_CLIENT_BASE_URL: http://loopback-node:8201
       BREW_CLIENT_USERNAME: loopback
       BREW_CLIENT_PASSWORD: blafablafa
       ECHO_TALKGROUP: "25"
@@ -37,7 +37,7 @@ services:
     entrypoint: ["/app/tetra-brew-webradio"]
     environment:
       BREW_MODE: webradio
-      BREW_CLIENT_BASE_URL: http://loopback-node:8091
+      BREW_CLIENT_BASE_URL: http://loopback-node:8201
       BREW_CLIENT_USERNAME: loopback
       BREW_CLIENT_PASSWORD: blafablafa
       WEBRADIO_ENABLED: "true"
