@@ -34,7 +34,7 @@ var translations = map[Lang]map[string]string{
 		"landing.whats_up.map.name":  "Coverage-Map",
 		"landing.whats_up.map.desc":  "Wo Funkgeraete erfolgreich gesehen werden — automatisch aus LIP-Positions, in H3-Hexagons aggregiert (Street/City/Region je nach Zoom).",
 		"landing.whats_up.ui.name":   "Dashboard",
-		"landing.whats_up.ui.desc":   "Volle Uebersicht: Repeater, Subscriber, Federation-Peers, SDS-Console.",
+		"landing.whats_up.ui.desc":   "Volle Uebersicht: TMO-Sites, Subscriber, Federation-Peers, SDS-Console.",
 
 		// Landing — TG-Schema
 		"landing.tgs.title":         "Talkgroups (GSSI-Schema)",
@@ -75,7 +75,7 @@ var translations = map[Lang]map[string]string{
 
 		// Map
 		"map.title":          "FreeTetra Map",
-		"map.repeater":       "Repeater",
+		"map.tmo_site":       "TMO-Sites",
 		"map.devices":        "Geräte",
 		"map.filter_title":   "Zeitraum der gezeigten Samples",
 		"map.filter_all":     "Alles",
@@ -92,7 +92,7 @@ var translations = map[Lang]map[string]string{
 		"map.ago_d":          "vor %d Tagen",
 
 		// Admin Dashboard
-		"admin.repeater":          "Repeater",
+		"admin.tmo_site":          "TMO-Sites",
 		"admin.subscriber":        "Subscriber",
 		"admin.positions":         "Positionen",
 		"admin.peers":             "Peers",
@@ -107,7 +107,7 @@ var translations = map[Lang]map[string]string{
 		"admin.col.lat":           "Latitude",
 		"admin.col.lon":           "Longitude",
 		"admin.col.time":          "Zeit",
-		"admin.empty.repeaters":   "Keine Repeater verbunden",
+		"admin.empty.tmo_sites":   "Keine TMO-Sites verbunden",
 		"admin.empty.subs":        "Niemand eingebucht",
 		"admin.empty.peers":       "Keine Peers verbunden",
 		"admin.empty.positions":   "Keine Positionen empfangen",
@@ -200,7 +200,7 @@ var translations = map[Lang]map[string]string{
 		"landing.whats_up.map.name":  "Coverage Map",
 		"landing.whats_up.map.desc":  "Where radios were successfully seen — built from LIP positions, aggregated into H3 hexagons (street/city/region depending on zoom).",
 		"landing.whats_up.ui.name":   "Dashboard",
-		"landing.whats_up.ui.desc":   "Full overview: repeaters, subscribers, federation peers, SDS console.",
+		"landing.whats_up.ui.desc":   "Full overview: TMO-sites, subscribers, federation peers, SDS console.",
 
 		// Landing — TG-Schema
 		"landing.tgs.title":         "Talkgroups (GSSI schema)",
@@ -241,7 +241,7 @@ var translations = map[Lang]map[string]string{
 
 		// Map
 		"map.title":          "FreeTetra Map",
-		"map.repeater":       "Repeaters",
+		"map.tmo_site":       "TMO-Sites",
 		"map.devices":        "Devices",
 		"map.filter_title":   "Time window of shown samples",
 		"map.filter_all":     "All",
@@ -258,7 +258,7 @@ var translations = map[Lang]map[string]string{
 		"map.ago_d":          "%d days ago",
 
 		// Admin Dashboard
-		"admin.repeater":          "Repeaters",
+		"admin.tmo_site":          "TMO-Sites",
 		"admin.subscriber":        "Subscribers",
 		"admin.positions":         "Positions",
 		"admin.peers":             "Peers",
@@ -273,7 +273,7 @@ var translations = map[Lang]map[string]string{
 		"admin.col.lat":           "Latitude",
 		"admin.col.lon":           "Longitude",
 		"admin.col.time":          "Time",
-		"admin.empty.repeaters":   "No repeaters connected",
+		"admin.empty.tmo_sites":   "No TMO-Sites connected",
 		"admin.empty.subs":        "No subscribers registered",
 		"admin.empty.peers":       "No peers connected",
 		"admin.empty.positions":   "No positions received",

@@ -148,7 +148,7 @@ message PositionSample {
   uint32 issi = 1;
   double lat = 2;
   double lon = 3;
-  string repeater = 4;
+  string tmo_site = 4;
 }
 
 message StationUpdate {

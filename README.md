@@ -12,7 +12,7 @@ page, live view, map, and a setup guide for new operators are public.
 
 ## What it does
 
-- Brew protocol server for BlueStation repeaters and hotspots (binary WebSocket)
+- Brew protocol server for BlueStation TMO-sites and hotspots (binary WebSocket)
 - Server-to-server federation with mesh relay, TTL, deduplication, path tracking
 - RadioID auto-auth — any licensed amateur on [radioid.net](https://radioid.net)
   is accepted automatically, no manual allow-list
@@ -24,7 +24,7 @@ page, live view, map, and a setup guide for new operators are public.
 
 ## Requirements
 
-- BlueStation repeater or hotspot — see
+- BlueStation TMO-site or hotspot — see
   [MidnightBlueLabs/tetra-bluestation](https://github.com/MidnightBlueLabs/tetra-bluestation)
 - Linux server with public IP (VPS, home server with port forwarding, or HamNet node)
 - Go 1.24+ for building, or pre-built binary from releases

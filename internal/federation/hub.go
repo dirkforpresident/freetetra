@@ -52,7 +52,7 @@ type CallHandler interface {
 	OnPeerCallEnd(peerName string, callUUID string, cause uint8)
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
-	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string)
+	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, tmoSite string)
 	OnPeerStationUpdate(peerName string, station map[string]any)
 	GetLocalSubscribers() map[uint32][]uint32
 
@@ -733,7 +733,7 @@ func (h *Hub) handleSdsRelay(peer *Peer, ctrl *federationv2pb.Control, sr *feder
 
 func (h *Hub) handlePositionSample(peer *Peer, ctrl *federationv2pb.Control, ps *federationv2pb.PositionSample) {
 	if h.handler != nil {
-		h.handler.OnPeerPositionSample(peer.Name, ps.GetIssi(), ps.GetLat(), ps.GetLon(), ps.GetRepeater())
+		h.handler.OnPeerPositionSample(peer.Name, ps.GetIssi(), ps.GetLat(), ps.GetLon(), ps.GetTmoSite())
 	}
 	if h.mesh.ShouldRelay(ctrl) {
 		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
@@ -889,15 +889,15 @@ func (h *Hub) BroadcastStation(station map[string]any) {
 
 // BroadcastPositionSample sendet einen empfangenen Position-Sample an alle Peers
 // (Coverage-Federation). Mesh-Router dedupliziert + relayed.
-func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, repeater string) {
+func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, tmoSite string) {
 	ctrl := &federationv2pb.Control{
 		Origin: h.serverName,
 		Payload: &federationv2pb.Control_PositionSample{
 			PositionSample: &federationv2pb.PositionSample{
-				Issi:     issi,
-				Lat:      lat,
-				Lon:      lon,
-				Repeater: repeater,
+				Issi:    issi,
+				Lat:     lat,
+				Lon:     lon,
+				TmoSite: tmoSite,
 			},
 		},
 	}

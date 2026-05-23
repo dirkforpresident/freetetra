@@ -127,7 +127,7 @@ sudo systemctl status freetetra
 
 ```bash
 curl https://freetetra-example.de/api/public/status
-# → {"server":"FreeTetra YOUR_CALLSIGN","repeaters":0,...}
+# → {"server":"FreeTetra YOUR_CALLSIGN","tmo_sites":0,...}
 
 curl https://freetetra-example.de/api/peers
 # → {"count":2,"peers":[{"name":"DO0RAM","direction":"outgoing",...}]}

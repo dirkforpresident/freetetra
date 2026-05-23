@@ -13,12 +13,12 @@ import (
 	"time"
 )
 
-// Station is a user-declared FreeTetra station (hotspot / repeater / bluestation).
+// Station is a user-declared FreeTetra station (hotspot / tmo_site / bluestation).
 // Pushed from the Pi-side freetetra-agent via POST /api/stations/push.
 type Station struct {
 	StationID    string  `json:"station_id"`
 	Callsign     string  `json:"callsign"`
-	Type         string  `json:"type"` // hotspot | repeater | bluestation
+	Type         string  `json:"type"` // hotspot | tmo_site | bluestation
 	Lat          float64 `json:"lat"`
 	Lon          float64 `json:"lon"`
 	DLFreqMHz    float64 `json:"dl_freq"`
@@ -61,12 +61,22 @@ func (s *stationStore) load() {
 		s.logger.Printf("stations: load: %v", err)
 		return
 	}
+	migrated := 0
 	for _, st := range list {
-		if st.StationID != "" {
-			s.items[st.StationID] = st
+		if st.StationID == "" {
+			continue
 		}
+		if st.Type == "repeater" {
+			st.Type = "tmo_site"
+			migrated++
+		}
+		s.items[st.StationID] = st
 	}
 	s.logger.Printf("stations: loaded %d", len(s.items))
+	if migrated > 0 {
+		s.logger.Printf("stations: migrated %d entries from type=repeater to type=tmo_site", migrated)
+		s.save()
+	}
 }
 
 func (s *stationStore) save() {
@@ -102,8 +112,13 @@ func (s *stationStore) Upsert(in Station) (*Station, error) {
 		return nil, fmt.Errorf("invalid coordinates")
 	}
 	t := strings.ToLower(strings.TrimSpace(in.Type))
-	if t != "hotspot" && t != "repeater" && t != "bluestation" {
-		return nil, fmt.Errorf("type must be hotspot, repeater, or bluestation")
+	// Accept legacy "repeater" on the way in and migrate to "tmo_site" so a
+	// peer running an older version doesn't get its station updates rejected.
+	if t == "repeater" {
+		t = "tmo_site"
+	}
+	if t != "hotspot" && t != "tmo_site" && t != "bluestation" {
+		return nil, fmt.Errorf("type must be hotspot, tmo_site, or bluestation")
 	}
 	in.Type = t
 	in.Callsign = strings.ToUpper(strings.TrimSpace(in.Callsign))

@@ -231,7 +231,7 @@ func (ts *TelemetryServer) handleEvent(client *TelemetryClient, event *Telemetry
 	}
 }
 
-// ActiveCount returns the number of connected telemetry clients (repeaters).
+// ActiveCount returns the number of connected telemetry clients (TMO-sites).
 func (ts *TelemetryServer) ActiveCount() int {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()

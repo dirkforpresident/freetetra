@@ -238,8 +238,8 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 
 <div class="stats">
     <div class="stat">
-        <div class="stat-value" id="s-repeaters">-</div>
-        <div class="stat-label">{{T:admin.repeater}}</div>
+        <div class="stat-value" id="s-tmo-sites">-</div>
+        <div class="stat-label">{{T:admin.tmo_site}}</div>
     </div>
     <div class="stat">
         <div class="stat-value" id="s-subscribers">-</div>
@@ -256,12 +256,12 @@ td.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
 </div>
 
 <div class="card">
-    <h2>{{T:admin.repeater}} <span class="count" id="repeater-count">0</span></h2>
+    <h2>{{T:admin.tmo_site}} <span class="count" id="tmo-site-count">0</span></h2>
     <div class="table-wrap"><table>
         <thead><tr><th>{{T:admin.col.callsign}}</th><th>{{T:admin.col.status}}</th><th>{{T:admin.col.type}}</th><th>{{T:admin.col.last_act}}</th></tr></thead>
-        <tbody id="repeaters-body"></tbody>
+        <tbody id="tmo-sites-body"></tbody>
     </table></div>
-    <div id="repeaters-empty" class="empty">{{T:admin.empty.repeaters}}</div>
+    <div id="tmo-sites-empty" class="empty">{{T:admin.empty.tmo_sites}}</div>
 </div>
 
 <div class="card">
@@ -331,12 +331,12 @@ async function update() {
         ]);
 
         document.getElementById("server-name").textContent = publicStatus.server || "FreeTetra";
-        document.getElementById("s-repeaters").textContent = publicStatus.repeaters || 0;
+        document.getElementById("s-tmo-sites").textContent = publicStatus.tmo_sites || 0;
         document.getElementById("s-subscribers").textContent = publicStatus.subscribers || 0;
         document.getElementById("s-peers").textContent = peers.count || (peers.peers || []).length || 0;
         document.getElementById("s-positions").textContent = publicStatus.positions || 0;
 
-        // Repeaters/Stations — aus stationStore (Quelle der Wahrheit fuer
+        // TMO-Sites/Stations — aus stationStore (Quelle der Wahrheit fuer
         // Station-Identitaet DO0RAM/DB0WL/...). Telemetry-Client (Brew-Login)
         // ist das Funkamateur-Callsign und gehoert in die Subscribers-Tabelle.
         const stations = (stationsResp.stations || []).slice().sort((a, b) => {
@@ -344,9 +344,9 @@ async function update() {
             if ((b.online ? 1 : 0) !== (a.online ? 1 : 0)) return (b.online ? 1 : 0) - (a.online ? 1 : 0);
             return (b.last_seen || 0) - (a.last_seen || 0);
         });
-        document.getElementById("repeater-count").textContent = "(" + stations.length + ")";
-        const rbody = document.getElementById("repeaters-body");
-        const rempty = document.getElementById("repeaters-empty");
+        document.getElementById("tmo-site-count").textContent = "(" + stations.length + ")";
+        const rbody = document.getElementById("tmo-sites-body");
+        const rempty = document.getElementById("tmo-sites-empty");
         if (stations.length === 0) {
             rbody.innerHTML = ""; rempty.style.display = "block";
         } else {

@@ -50,7 +50,7 @@ type Service struct {
 	aprsBridge    *APRSBridge
 	radioIDAuth   *RadioIDAuth
 	rateLimiter   *AuthRateLimiter
-	repeaters     *RepeaterHeartbeat
+	tmoSites      *TMOSiteHeartbeat
 	telemetry     *TelemetryServer
 	coverageDB    *CoverageDB
 	stationStore  *stationStore
@@ -157,13 +157,13 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 		logger.Printf("RadioID: auto-auth enabled (shared key configured)")
 	}
 
-	s.repeaters = newRepeaterHeartbeat()
+	s.tmoSites = newTMOSiteHeartbeat()
 	s.stationStore = newStationStore(logger)
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.registerPublicHandlers()
 	s.registerRadioIDHandlers()
-	s.registerRepeaterHandlers()
+	s.registerTMOSiteHandlers()
 	s.registerTelemetryServer()
 	s.registerStationHandlers()
 	s.registerLiveHandlers()
