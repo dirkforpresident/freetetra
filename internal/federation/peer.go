@@ -13,9 +13,9 @@ type Peer struct {
 	Name      string
 	Direction string // "outgoing" or "incoming"
 
-	mu           sync.RWMutex
-	stream       rpcStream
-	cancel       context.CancelFunc
+	mu     sync.RWMutex
+	stream rpcStream
+	cancel context.CancelFunc
 
 	// Remote subscriber state
 	issis            map[uint32]bool            // ISSIs registered on this peer
@@ -24,6 +24,13 @@ type Peer struct {
 	send   chan *federationv2pb.StreamFrame
 	done   chan struct{}
 	logger *log.Logger
+
+	// closeErr carries a rejection reason set by a handler when the peer
+	// should be dropped mid-stream. The readLoop checks it after every
+	// handleControlMessage; the Connect handler returns it to gRPC so the
+	// status code travels back to the dialer. nil means normal close.
+	closeErrMu sync.Mutex
+	closeErr   error
 }
 
 type rpcStream interface {
@@ -44,6 +51,28 @@ func newPeer(name, direction string, stream rpcStream, cancel context.CancelFunc
 		done:             make(chan struct{}),
 		logger:           logger,
 	}
+}
+
+// SetCloseErr records why this peer is being dropped. The first call wins so
+// the original reason (e.g. version mismatch) isn't overwritten by a generic
+// downstream "context canceled" once Close() takes effect. Safe to call from
+// any goroutine.
+func (p *Peer) SetCloseErr(err error) {
+	if err == nil {
+		return
+	}
+	p.closeErrMu.Lock()
+	if p.closeErr == nil {
+		p.closeErr = err
+	}
+	p.closeErrMu.Unlock()
+}
+
+// CloseErr returns the recorded rejection reason, or nil for a normal close.
+func (p *Peer) CloseErr() error {
+	p.closeErrMu.Lock()
+	defer p.closeErrMu.Unlock()
+	return p.closeErr
 }
 
 // controlPayloadKind returns a short string describing which oneof case

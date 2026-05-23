@@ -16,17 +16,26 @@ import (
 
 	federationv2pb "github.com/freetetra/server/internal/federation/proto/v2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	grpcpeer "google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
 	federationSubpathHeader = "x-brew-subpath"
 
-	// ProtocolVersion advertised in the Hello handshake.
+	// ProtocolVersion is the highest federation protocol version we speak.
 	ProtocolVersion = 2
+
+	// MinSupportedProtocolVersion is the lowest peer version we accept.
+	// A peer outside [Min, ProtocolVersion] gets rejected at Hello time
+	// with FailedPrecondition; the dialer treats this as a permanent
+	// error and stops reconnecting.
+	MinSupportedProtocolVersion = 2
 )
 
 // PeerConfig is the configuration for a federation peer.
@@ -233,11 +242,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		if err != nil {
 			cancel()
 			_ = conn.Close()
-			if isIncompatibleGRPCEndpoint(err) {
-				h.logger.Printf("federation: peer %s is not a compatible gRPC endpoint (likely reverse-proxy not h2c): %v (retry in %s)", pc.Name, err, delay)
-			} else {
-				h.logger.Printf("federation: failed to open stream to %s: %v (retry in %s)", pc.Name, err, delay)
-			}
+			h.logHandshakeError(pc.Name, err, delay)
 			if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
 				return
 			}
@@ -257,8 +262,17 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		h.readLoop(peer)
 		_ = conn.Close()
 
-		// Cleanup and reconnect
+		// Cleanup and reconnect.
 		h.unregisterPeer(peer)
+
+		// If the peer was rejected for a permanent reason (e.g. version
+		// mismatch) there is no point retrying — config or code on one
+		// side has to change first.
+		if closeErr := peer.CloseErr(); closeErr != nil && isPermanentRejection(closeErr) {
+			h.logger.Printf("federation: peer %s permanently disabled: %v (no reconnect)", pc.Name, closeErr)
+			return
+		}
+
 		h.logger.Printf("federation: reconnecting to %s in %s...", pc.Name, delay)
 
 		if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
@@ -307,6 +321,13 @@ func (h *Hub) readLoop(peer *Peer) {
 
 		if ctrl := frame.GetControl(); ctrl != nil {
 			h.handleControlMessage(peer, ctrl)
+			// A handler (e.g. handleHello version-check) may have marked
+			// the peer for rejection. Exit the loop so Connect returns
+			// the status to gRPC and maintainOutgoingPeer can decide
+			// whether to retry.
+			if peer.CloseErr() != nil {
+				return
+			}
 			continue
 		}
 		if vf := frame.GetVoiceFrame(); vf != nil {
@@ -316,37 +337,66 @@ func (h *Hub) readLoop(peer *Peer) {
 }
 
 // Connect handles an incoming protobuf RPC stream from another federation peer.
+//
+// Errors returned here are gRPC status errors so the remote dialer sees the
+// reason (Unauthenticated for bad key, PermissionDenied for bad subpath,
+// FailedPrecondition for version mismatch, etc.) instead of a generic
+// transport error. Every rejection is also logged locally with the peer name
+// and remote address.
 func (h *Hub) Connect(stream grpc.BidiStreamingServer[federationv2pb.StreamFrame, federationv2pb.StreamFrame]) error {
+	remote := remoteAddrFromContext(stream.Context())
+
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
-		return fmt.Errorf("missing metadata")
+		h.logger.Printf("federation: rejected incoming connection from %s — no gRPC metadata", remote)
+		return status.Error(codes.InvalidArgument, "missing metadata")
 	}
 	peerName := firstMD(md, "x-brew-peer")
 	peerKey := firstMD(md, "x-brew-key")
 	peerSubpath := firstMD(md, federationSubpathHeader)
-	if peerName == "" || peerKey == "" {
-		return fmt.Errorf("missing peer credentials")
+
+	if peerName == "" {
+		h.logger.Printf("federation: rejected incoming connection from %s — missing x-brew-peer header", remote)
+		return status.Error(codes.InvalidArgument, "missing x-brew-peer header")
+	}
+	if peerKey == "" {
+		h.logger.Printf("federation: rejected incoming peer %s (%s) — missing x-brew-key header", peerName, remote)
+		return status.Error(codes.Unauthenticated, "missing x-brew-key header")
 	}
 	if peerKey != h.peerKey {
-		h.logger.Printf("federation: rejected incoming peer %s (invalid key)", peerName)
-		return fmt.Errorf("invalid peer key")
+		h.logger.Printf("federation: rejected incoming peer %s (%s) — invalid shared key", peerName, remote)
+		return status.Error(codes.Unauthenticated, "invalid shared key")
 	}
 	expectedSubpath := federationSubpathForKey(h.peerKey)
-	if peerSubpath == "" || peerSubpath != expectedSubpath {
-		h.logger.Printf("federation: rejected incoming peer %s (invalid federation subpath)", peerName)
-		return fmt.Errorf("invalid federation subpath")
+	if peerSubpath != expectedSubpath {
+		h.logger.Printf("federation: rejected incoming peer %s (%s) — invalid federation subpath", peerName, remote)
+		return status.Error(codes.PermissionDenied, "invalid federation subpath")
 	}
 
 	peer := newPeer(peerName, "incoming", stream, nil, h.logger)
 	h.registerPeer(peer)
-	h.logger.Printf("federation: accepted incoming peer %s", peerName)
+	h.logger.Printf("federation: accepted incoming peer %s (%s)", peerName, remote)
 
 	_ = peer.SendControl(h.buildHello(peerName))
 	h.sendFullSync(peer)
 
 	go peer.writeLoop()
 	h.readLoop(peer)
-	return nil
+
+	// readLoop returns either on normal disconnect (nil) or on a handler
+	// rejection (e.g. version mismatch). Surface the latter to gRPC so the
+	// dialer sees the status code.
+	return peer.CloseErr()
+}
+
+// remoteAddrFromContext extracts "host:port" of the peer's transport address
+// from a gRPC server context, or "unknown" if it isn't available.
+func remoteAddrFromContext(ctx context.Context) string {
+	p, ok := grpcpeer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return "unknown"
+	}
+	return p.Addr.String()
 }
 
 func (h *Hub) handleControlMessage(peer *Peer, ctrl *federationv2pb.Control) {
@@ -458,6 +508,64 @@ func isIncompatibleGRPCEndpoint(err error) bool {
 		strings.Contains(s, "http/1.1")
 }
 
+// isPermanentRejection reports whether the peer's reason for closing the
+// stream means retrying is pointless. Today: protocol version mismatch
+// (FailedPrecondition) and credential-level rejections from the remote
+// (Unauthenticated, PermissionDenied) — none of these recover without a
+// config or code change on one side.
+func isPermanentRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	switch st.Code() {
+	case codes.FailedPrecondition,
+		codes.Unauthenticated,
+		codes.PermissionDenied:
+		return true
+	default:
+		return false
+	}
+}
+
+// logHandshakeError emits a categorized log line for a stream-open failure
+// so operators can tell auth issues, proxy misconfig, and transport problems
+// apart at a glance.
+func (h *Hub) logHandshakeError(peerName string, err error, retryIn time.Duration) {
+	if isIncompatibleGRPCEndpoint(err) {
+		h.logger.Printf("federation: peer %s endpoint is not h2c gRPC (reverse-proxy misconfigured?): %v (retry in %s)",
+			peerName, err, retryIn)
+		return
+	}
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.Unauthenticated:
+			h.logger.Printf("federation: peer %s rejected our credentials — %s (retry in %s; check FEDERATION_KEY matches)",
+				peerName, st.Message(), retryIn)
+		case codes.PermissionDenied:
+			h.logger.Printf("federation: peer %s denied federation subpath — %s (retry in %s)",
+				peerName, st.Message(), retryIn)
+		case codes.InvalidArgument:
+			h.logger.Printf("federation: peer %s rejected request — %s (retry in %s)",
+				peerName, st.Message(), retryIn)
+		case codes.FailedPrecondition:
+			h.logger.Printf("federation: peer %s precondition failed — %s (retry in %s)",
+				peerName, st.Message(), retryIn)
+		case codes.Unavailable:
+			h.logger.Printf("federation: peer %s unreachable — %s (retry in %s)",
+				peerName, st.Message(), retryIn)
+		default:
+			h.logger.Printf("federation: peer %s handshake failed code=%s msg=%q (retry in %s)",
+				peerName, st.Code(), st.Message(), retryIn)
+		}
+		return
+	}
+	h.logger.Printf("federation: peer %s handshake error: %v (retry in %s)", peerName, err, retryIn)
+}
+
 func federationSubpathForKey(key string) string {
 	normalized := strings.TrimSpace(key)
 	sum := sha256.Sum256([]byte(normalized))
@@ -465,8 +573,23 @@ func federationSubpathForKey(key string) string {
 }
 
 func (h *Hub) handleHello(peer *Peer, ctrl *federationv2pb.Control, hello *federationv2pb.Hello) {
-	h.logger.Printf("federation: hello from %s (version %d)", ctrl.GetOrigin(), ctrl.GetProtocolVersion())
-	if origin := ctrl.GetOrigin(); origin != "" && origin != peer.Name {
+	origin := ctrl.GetOrigin()
+	peerVer := ctrl.GetProtocolVersion()
+	h.logger.Printf("federation: hello from %s (version %d)", origin, peerVer)
+
+	if peerVer < MinSupportedProtocolVersion || peerVer > ProtocolVersion {
+		err := status.Errorf(
+			codes.FailedPrecondition,
+			"incompatible protocol version %d (we support %d-%d)",
+			peerVer, MinSupportedProtocolVersion, ProtocolVersion,
+		)
+		h.logger.Printf("federation: peer %s rejected — %v", origin, err)
+		peer.SetCloseErr(err)
+		peer.Close()
+		return
+	}
+
+	if origin != "" && origin != peer.Name {
 		old := peer.Name
 		h.renamePeer(peer, origin)
 		h.logger.Printf("federation: renamed peer %s -> %s", old, origin)
@@ -955,37 +1078,47 @@ func (h *Hub) sendPeerExchange(peer *Peer) {
 }
 
 // tryAddDiscoveredPeer adds a newly discovered peer and connects to it.
-// Returns true if the peer was new.
+// Returns true if the peer was new. Skips are silent for the common
+// self-reference / already-known cases (gossip echoes are normal traffic),
+// logged for the surprising cases (legacy URL, conflicting URL for a known
+// name) and audit-logged once when a new peer is actually dialed.
 func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
-	// Self-Check: niemals zu sich selbst connecten (sonst Geister-Peer
-	// "HH-Cluster incoming" auf eigenem Server).
+	// Common silent skip: gossip echoed us back.
 	if name == h.serverName || url == h.selfURL {
 		return false
 	}
-	// Legacy websocket gossip URLs (e.g. .../peer/) are not valid for
-	// protobuf gRPC federation transport.
+	// Legacy websocket gossip URLs (e.g. .../peer/) are not valid for the
+	// v2 gRPC federation transport. Surface this once.
 	if strings.Contains(strings.ToLower(url), "/peer") {
-		h.logger.Printf("federation: skipping discovered non-gRPC peer %s at %s", name, url)
+		h.logger.Printf("federation: discovery: skip %s at %s — legacy WS URL not supported by v2 transport", name, url)
 		return false
 	}
 
 	h.knownMu.Lock()
 	// Dedup by name OR by URL — a bootstrap peer (e.g. "peer-0") may already
 	// point at the same URL under a different label.
-	if _, exists := h.knownPeers[name]; exists {
+	if existingURL, exists := h.knownPeers[name]; exists {
 		h.knownMu.Unlock()
+		// Surprising case: same name, different URL. Don't silently
+		// switch — operator should know.
+		if existingURL != url {
+			h.logger.Printf("federation: discovery: peer %s already known at %s; ignoring gossip URL %s",
+				name, existingURL, url)
+		}
 		return false
 	}
-	for _, existingURL := range h.knownPeers {
+	for existingName, existingURL := range h.knownPeers {
 		if existingURL == url {
 			h.knownMu.Unlock()
+			h.logger.Printf("federation: discovery: skip %s — URL %s already known as %s",
+				name, url, existingName)
 			return false
 		}
 	}
 	h.knownPeers[name] = url
 	h.knownMu.Unlock()
 
-	// Check if already connected (by name)
+	// Check if already connected (by name).
 	h.mu.RLock()
 	alreadyConnected := false
 	for _, p := range h.peers {
@@ -1000,7 +1133,7 @@ func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
 		return false
 	}
 
-	h.logger.Printf("federation: auto-connecting to discovered peer %s at %s", name, url)
+	h.logger.Printf("federation: discovery: new peer %s at %s — dialing", name, url)
 	go h.maintainOutgoingPeer(h.ctx, PeerConfig{
 		Name: name,
 		URL:  url,
