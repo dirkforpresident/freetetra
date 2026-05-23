@@ -543,14 +543,14 @@ func (h *Hub) handleCallStart(peer *Peer, ctrl *federationv2pb.Control, cs *fede
 	relay := h.mesh.PrepareRelay(ctrl)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	h.callMu.Lock()
+	defer h.callMu.Unlock()
 	for _, p := range h.peers {
 		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
 			continue
 		}
 		_ = p.SendControl(relay)
-		h.callMu.Lock()
 		h.activeCalls[cs.GetUuid()][p.Name] = true
-		h.callMu.Unlock()
 	}
 }
 
@@ -705,20 +705,17 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 	}
 	h.mesh.PrepareOutgoing(ctrl)
 
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	h.callMu.Lock()
+	defer h.callMu.Unlock()
 	if h.activeCalls[callUUID] == nil {
 		h.activeCalls[callUUID] = make(map[string]bool)
 	}
-	h.callMu.Unlock()
-
-	h.mu.RLock()
 	for _, peer := range h.peers {
 		_ = peer.SendControl(ctrl)
-		h.callMu.Lock()
 		h.activeCalls[callUUID][peer.Name] = true
-		h.callMu.Unlock()
 	}
-	h.mu.RUnlock()
 }
 
 // BroadcastStation sendet einen BlueStation-Heartbeat an alle Peers
@@ -1032,33 +1029,6 @@ func (h *Hub) unregisterPeer(peer *Peer) {
 		}
 	}
 	h.mu.Unlock()
-}
-
-func (h *Hub) getPeer(name string) *Peer {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if p, ok := h.peers[name]; ok {
-		return p
-	}
-	// Try with :in suffix
-	return h.peers[name+":in"]
-}
-
-func (h *Hub) findPeersForGSSI(gssi uint32, excludeName string) []*Peer {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	var targets []*Peer
-	seen := make(map[string]bool)
-	for _, peer := range h.peers {
-		if peer.Name == excludeName || seen[peer.Name] {
-			continue
-		}
-		if peer.HasSubscribersOnGSSI(gssi) {
-			targets = append(targets, peer)
-			seen[peer.Name] = true
-		}
-	}
-	return targets
 }
 
 func (h *Hub) sendFullSync(peer *Peer) {
