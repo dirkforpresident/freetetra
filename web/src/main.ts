@@ -8,7 +8,10 @@ import { router } from "./router";
 import { i18n } from "./i18n";
 
 const vuetify = createVuetify({
-  theme: { defaultTheme: "dark" },
+  // Default theme is "light" so the public landing / mitmachen pages match
+  // the previous look. Admin and live/map pages opt into dark via
+  // <v-theme-provider theme="dark"> at the page level.
+  theme: { defaultTheme: "light" },
 });
 
 createApp(App).use(router).use(i18n).use(vuetify).mount("#app");
