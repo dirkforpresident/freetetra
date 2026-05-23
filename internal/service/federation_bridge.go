@@ -44,9 +44,6 @@ func newFederationBridge(cfg config.Config, logger *log.Logger, svc *Service) *f
 		fb.hub.UseSharedPortRPC()
 		logger.Printf("federation: multiplexing HTTP, APIs and gRPC on %s", cfg.HTTPListenAddr)
 	}
-	if cfg.Federation.UDPPort > 0 || cfg.Federation.UDPAdvAddr != "" {
-		logger.Printf("federation: UDP voice disabled by configuration, using TCP WS for voice")
-	}
 	return fb
 }
 

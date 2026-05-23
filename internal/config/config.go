@@ -88,11 +88,6 @@ type FederationConfig struct {
 	Peers         []string // Peer RPC targets (host:port or URL with host:port)
 	SelfURL       string   // Our own URL for advertising to peers (gossip)
 	RPCListenAddr string   // Local protobuf RPC bind address (e.g. :8092)
-
-	// UDP-Voice-Plane: Voice-Frames werden ueber UDP statt WS-TCP
-	// uebertragen — vermeidet TCP-head-of-line-blocking + Audio-Schleppe.
-	UDPPort    int    // local UDP listen port (0 = disabled)
-	UDPAdvAddr string // public UDP address "host:port" advertised to peers
 }
 
 type ServerConfig struct {
@@ -345,8 +340,6 @@ func LoadFromEnv() (Config, error) {
 			Peers:         envCSV("FEDERATION_PEERS"),
 			SelfURL:       env("FEDERATION_SELF_URL", ""),
 			RPCListenAddr: env("FEDERATION_RPC_LISTEN_ADDR", ":8092"),
-			UDPPort:       envInt("FEDERATION_UDP_PORT", 0),
-			UDPAdvAddr:    env("FEDERATION_UDP_ADV_ADDR", ""),
 		},
 		Operator: OperatorConfig{
 			Name:        env("OPERATOR_NAME", ""),
