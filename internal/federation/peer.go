@@ -107,8 +107,6 @@ func controlPayloadKind(ctrl *federationv2pb.Control) string {
 }
 
 // SendControl enqueues a typed control message for delivery to the peer.
-// This is the protobuf-native send path; SendJSON is the legacy adapter
-// kept around during the transition off the Message struct.
 func (p *Peer) SendControl(ctrl *federationv2pb.Control) error {
 	if ctrl == nil {
 		return nil
@@ -127,33 +125,6 @@ func (p *Peer) SendControl(ctrl *federationv2pb.Control) error {
 	}
 }
 
-// SendJSON sends a JSON federation message to the peer.
-func (p *Peer) SendJSON(msg *Message) error {
-	ctrl := messageToControl(msg)
-	if ctrl == nil {
-		return nil
-	}
-	frame := &federationv2pb.StreamFrame{
-		Body: &federationv2pb.StreamFrame_Control{Control: ctrl},
-	}
-	select {
-	case p.send <- frame:
-		return nil
-	case <-p.done:
-		return context.Canceled
-	default:
-		p.logger.Printf("federation: send buffer full for peer %s, dropping message type=%s", p.Name, msg.Type)
-		return nil
-	}
-}
-
-// SendBinary sends raw binary data to the peer (for voice frames).
-func (p *Peer) SendBinary(data []byte) error {
-	if len(data) < 36 {
-		return nil
-	}
-	return p.SendVoiceFrame(string(data[:36]), data[36:])
-}
 
 // SendVoiceFrame sends a typed v2 voice frame to the peer. Drops silently
 // on a full buffer rather than logging — voice is high-frequency (3-4

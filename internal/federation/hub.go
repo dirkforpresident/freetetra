@@ -662,15 +662,6 @@ func (h *Hub) handleStationUpdate(peer *Peer, ctrl *federationv2pb.Control, su *
 	}
 }
 
-// handleBinaryMessage processes binary federation data (voice frames).
-// Format: callUUID (36 bytes ASCII) + frame payload
-func (h *Hub) handleBinaryMessage(peer *Peer, data []byte) {
-	if len(data) < 36 {
-		return
-	}
-
-	h.handleVoiceFrame(peer, string(data[:36]), data[36:])
-}
 
 func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
 	if len(callUUID) != 36 {
