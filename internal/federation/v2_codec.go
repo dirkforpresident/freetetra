@@ -1,5 +1,13 @@
 package federation
 
+// v2_codec.go: Transitional Message ↔ Control adapters.
+//
+// These functions exist purely to bridge the legacy Message struct in
+// protocol.go to the typed protobuf Control envelope during the
+// federation protobuf-only refactor. Deleted in Task 5 of
+// docs/superpowers/plans/2026-05-23-federation-protobuf-only.md
+// once all call sites operate on *Control directly.
+
 import (
 	"encoding/hex"
 

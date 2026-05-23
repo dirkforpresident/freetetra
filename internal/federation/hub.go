@@ -18,13 +18,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
 	federationSubpathHeader = "x-brew-subpath"
-)
 
-const (
 	// ProtocolVersion advertised in the Hello handshake.
 	ProtocolVersion = 2
 )
@@ -200,24 +199,12 @@ func (h *Hub) serveRPC(ctx context.Context) {
 	}
 }
 
-// buildHello konstruiert eine Hello-Message. Wenn UDP-Voice aktiv ist,
-// nimmt es einen stabilen pro-Peer-Token + unsere UDP-Adresse mit auf,
-// sodass der Peer voice-frames per UDP zu uns schicken kann.
-//
-// WICHTIG: Token muss STABIL pro Peer-Name bleiben (nicht bei jedem
-// Hello neu generieren). Sonst Race: outgoing + incoming Connection
-// gleichzeitig schreiben verschiedene Tokens, Sender und Receiver sind
-// out-of-sync → Pakete werden silent verworfen.
-func (h *Hub) buildHello(peerName string) *Message {
-	msg := &Message{
-		Type:    MsgHello,
-		Origin:  h.serverName,
-		Version: ProtocolVersion,
-		Capabilities: []string{
-			CapabilityGRPCEnvelopeV1,
-			CapabilityTypedProtoV2Draft,
-		},
-	}
+// buildHello constructs the Hello control message advertised to peers.
+// UDP voice advertisement is preserved here for as long as the UDP plane
+// is wired (removed wholesale in Task 6). The token must remain STABLE
+// per peer name across reconnects — see Hub.udpInTokens.
+func (h *Hub) buildHello(peerName string) *federationv2pb.Control {
+	hello := &federationv2pb.Hello{}
 	if h.udpVoice != nil && h.udpVoice.Advertised() != "" {
 		h.udpInTokenMu.Lock()
 		token := h.udpInTokens[peerName]
@@ -226,10 +213,16 @@ func (h *Hub) buildHello(peerName string) *Message {
 			h.udpInTokens[peerName] = token
 		}
 		h.udpInTokenMu.Unlock()
-		msg.UDPAddr = h.udpVoice.Advertised()
-		msg.UDPToken = token
+		hello.UdpAddr = h.udpVoice.Advertised()
+		hello.UdpToken = token
 	}
-	return msg
+	return &federationv2pb.Control{
+		Origin:          h.serverName,
+		ProtocolVersion: ProtocolVersion,
+		Payload: &federationv2pb.Control_Hello{
+			Hello: hello,
+		},
+	}
 }
 
 // maintainOutgoingPeer keeps a persistent connection to an outgoing peer.
@@ -295,7 +288,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		// A successful stream means the endpoint is healthy — reset backoff.
 		delay = baseDelay
 
-		peer.SendJSON(h.buildHello(pc.Name))
+		_ = peer.SendControl(h.buildHello(pc.Name))
 		h.sendFullSync(peer)
 
 		go peer.writeLoop()
@@ -386,7 +379,7 @@ func (h *Hub) Connect(stream grpc.BidiStreamingServer[federationv2pb.StreamFrame
 	h.registerPeer(peer)
 	h.logger.Printf("federation: accepted incoming peer %s", peerName)
 
-	peer.SendJSON(h.buildHello(peerName))
+	_ = peer.SendControl(h.buildHello(peerName))
 	h.sendFullSync(peer)
 
 	go peer.writeLoop()
@@ -465,7 +458,7 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		}
 	default:
 		// Data messages: full mesh dedup/TTL/loop check
-		if !h.mesh.ShouldProcess(&msg) {
+		if !h.mesh.ShouldProcess(messageToControl(&msg)) {
 			return
 		}
 	}
@@ -552,9 +545,9 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 			h.logger.Printf("federation: %s deregistered ISSI %d [ttl=%d]", peer.Name, msg.ISSI, msg.TTL)
 		}
 		// Mesh relay to all other peers
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
-			h.relayToPeers(relay, peer.Name)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
+			h.relayMessageToPeers(relay, peer.Name)
 		}
 
 	case MsgAffiliateUpdate:
@@ -566,9 +559,9 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 			peer.DeaffiliateISSI(msg.ISSI, msg.GSSIs)
 			h.logger.Printf("federation: %s deaffiliated ISSI %d from GSSIs %v [ttl=%d]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL)
 		}
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
-			h.relayToPeers(relay, peer.Name)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
+			h.relayMessageToPeers(relay, peer.Name)
 		}
 
 	case MsgCallStart:
@@ -583,11 +576,11 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		}
 		h.callMu.Unlock()
 
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
 			h.mu.RLock()
 			for _, p := range h.peers {
-				if p.Name != peer.Name && !IsInPath(&msg, p.Name) {
+				if p.Name != peer.Name && !IsInPath(messageToControl(&msg), p.Name) {
 					p.SendJSON(relay)
 					h.callMu.Lock()
 					h.activeCalls[msg.UUID][p.Name] = true
@@ -607,11 +600,11 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		delete(h.activeCalls, msg.UUID)
 		h.callMu.Unlock()
 
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
 			h.mu.RLock()
 			for _, p := range h.peers {
-				if p.Name != peer.Name && !IsInPath(&msg, p.Name) {
+				if p.Name != peer.Name && !IsInPath(messageToControl(&msg), p.Name) {
 					p.SendJSON(relay)
 				}
 			}
@@ -622,27 +615,27 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 		if h.handler != nil {
 			h.handler.OnPeerSDSRelay(peer.Name, msg.SourceISSI, msg.DestISSI, msg.SDSData)
 		}
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
-			h.relayToPeers(relay, peer.Name)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
+			h.relayMessageToPeers(relay, peer.Name)
 		}
 
 	case MsgPositionSample:
 		if h.handler != nil {
 			h.handler.OnPeerPositionSample(peer.Name, msg.ISSI, msg.Lat, msg.Lon, msg.Repeater)
 		}
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
-			h.relayToPeers(relay, peer.Name)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
+			h.relayMessageToPeers(relay, peer.Name)
 		}
 
 	case MsgStationUpdate:
 		if h.handler != nil {
 			h.handler.OnPeerStationUpdate(peer.Name, msg.Station)
 		}
-		if h.mesh.ShouldRelay(&msg) {
-			relay := h.mesh.PrepareRelay(&msg)
-			h.relayToPeers(relay, peer.Name)
+		if h.mesh.ShouldRelay(messageToControl(&msg)) {
+			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
+			h.relayMessageToPeers(relay, peer.Name)
 		}
 	}
 }
@@ -684,15 +677,25 @@ func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
 
 // BroadcastSubscriber notifies all peers about a subscriber change.
 func (h *Hub) BroadcastSubscriber(issi uint32, action string, gssis []uint32) {
-	msg := &Message{
-		Type:   MsgSubscriberUpdate,
-		Origin: h.serverName,
-		ISSI:   issi,
-		Action: action,
-		GSSIs:  gssis,
+	subAction := federationv2pb.SubscriberUpdate_ACTION_UNSPECIFIED
+	switch action {
+	case "register":
+		subAction = federationv2pb.SubscriberUpdate_ACTION_REGISTER
+	case "deregister":
+		subAction = federationv2pb.SubscriberUpdate_ACTION_DEREGISTER
 	}
-	h.mesh.PrepareOutgoing(msg)
-	h.broadcastToAllPeers(msg)
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_SubscriberUpdate{
+			SubscriberUpdate: &federationv2pb.SubscriberUpdate{
+				Issi:   issi,
+				Action: subAction,
+				Gssis:  append([]uint32(nil), gssis...),
+			},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	h.broadcastToAllPeers(ctrl)
 }
 
 // BroadcastAffiliate notifies all peers about an affiliation change.
@@ -707,15 +710,25 @@ func (h *Hub) BroadcastAffiliate(issi uint32, action string, gssis []uint32) {
 	if len(fedGSSIs) == 0 {
 		return
 	}
-	msg := &Message{
-		Type:   MsgAffiliateUpdate,
-		Origin: h.serverName,
-		ISSI:   issi,
-		Action: action,
-		GSSIs:  fedGSSIs,
+	affAction := federationv2pb.AffiliateUpdate_ACTION_UNSPECIFIED
+	switch action {
+	case "affiliate":
+		affAction = federationv2pb.AffiliateUpdate_ACTION_AFFILIATE
+	case "deaffiliate":
+		affAction = federationv2pb.AffiliateUpdate_ACTION_DEAFFILIATE
 	}
-	h.mesh.PrepareOutgoing(msg)
-	h.broadcastToAllPeers(msg)
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_AffiliateUpdate{
+			AffiliateUpdate: &federationv2pb.AffiliateUpdate{
+				Issi:   issi,
+				Action: affAction,
+				Gssis:  append([]uint32(nil), fedGSSIs...),
+			},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	h.broadcastToAllPeers(ctrl)
 }
 
 // BroadcastCallStart notifies peers that have subscribers on the target GSSI.
@@ -724,18 +737,20 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 	if !isFederatedGSSI(destGSSI) {
 		return
 	}
-	msg := &Message{
-		Type:       MsgCallStart,
-		Origin:     h.serverName,
-		UUID:       callUUID,
-		SourceISSI: sourceISSI,
-		DestGSSI:   destGSSI,
-		Priority:   priority,
-		Service:    service,
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_CallStart{
+			CallStart: &federationv2pb.CallStart{
+				Uuid:       callUUID,
+				SourceIssi: sourceISSI,
+				DestGssi:   destGSSI,
+				Priority:   uint32(priority),
+				Service:    uint32(service),
+			},
+		},
 	}
-	h.mesh.PrepareOutgoing(msg)
+	h.mesh.PrepareOutgoing(ctrl)
 
-	// Broadcast to ALL peers (mesh relay — they forward further)
 	h.callMu.Lock()
 	if h.activeCalls[callUUID] == nil {
 		h.activeCalls[callUUID] = make(map[string]bool)
@@ -744,7 +759,7 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 
 	h.mu.RLock()
 	for _, peer := range h.peers {
-		peer.SendJSON(msg)
+		_ = peer.SendControl(ctrl)
 		h.callMu.Lock()
 		h.activeCalls[callUUID][peer.Name] = true
 		h.callMu.Unlock()
@@ -755,28 +770,37 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 // BroadcastStation sendet einen BlueStation-Heartbeat an alle Peers
 // (Stations-Federation). Damit zeigen alle Server die gleiche Station-Liste.
 func (h *Hub) BroadcastStation(station map[string]any) {
-	msg := &Message{
-		Type:    MsgStationUpdate,
-		Origin:  h.serverName,
-		Station: station,
+	st, err := structpb.NewStruct(station)
+	if err != nil {
+		h.logger.Printf("federation: cannot encode station map: %v", err)
+		return
 	}
-	h.mesh.PrepareOutgoing(msg)
-	h.broadcastToAllPeers(msg)
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_StationUpdate{
+			StationUpdate: &federationv2pb.StationUpdate{Station: st},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	h.broadcastToAllPeers(ctrl)
 }
 
 // BroadcastPositionSample sendet einen empfangenen Position-Sample an alle Peers
 // (Coverage-Federation). Mesh-Router dedupliziert + relayed.
 func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, repeater string) {
-	msg := &Message{
-		Type:     MsgPositionSample,
-		Origin:   h.serverName,
-		ISSI:     issi,
-		Lat:      lat,
-		Lon:      lon,
-		Repeater: repeater,
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_PositionSample{
+			PositionSample: &federationv2pb.PositionSample{
+				Issi:     issi,
+				Lat:      lat,
+				Lon:      lon,
+				Repeater: repeater,
+			},
+		},
 	}
-	h.mesh.PrepareOutgoing(msg)
-	h.broadcastToAllPeers(msg)
+	h.mesh.PrepareOutgoing(ctrl)
+	h.broadcastToAllPeers(ctrl)
 }
 
 // BroadcastCallEnd notifies all peers about a call ending.
@@ -785,14 +809,17 @@ func (h *Hub) BroadcastCallEnd(callUUID string, cause uint8) {
 	delete(h.activeCalls, callUUID)
 	h.callMu.Unlock()
 
-	msg := &Message{
-		Type:   MsgCallEnd,
+	ctrl := &federationv2pb.Control{
 		Origin: h.serverName,
-		UUID:   callUUID,
-		Cause:  cause,
+		Payload: &federationv2pb.Control_CallEnd{
+			CallEnd: &federationv2pb.CallEnd{
+				Uuid:  callUUID,
+				Cause: uint32(cause),
+			},
+		},
 	}
-	h.mesh.PrepareOutgoing(msg)
-	h.broadcastToAllPeers(msg)
+	h.mesh.PrepareOutgoing(ctrl)
+	h.broadcastToAllPeers(ctrl)
 }
 
 // BroadcastVoiceFrame sends a voice frame to all connected peers.
@@ -812,15 +839,23 @@ func (h *Hub) BroadcastVoiceFrame(callUUID string, frameData []byte) {
 
 // BroadcastSDS relays an SDS message through the mesh.
 func (h *Hub) BroadcastSDS(sourceISSI, destISSI uint32, sdsDataHex string) {
-	msg := &Message{
-		Type:       MsgSDSRelay,
-		Origin:     h.serverName,
-		SourceISSI: sourceISSI,
-		DestISSI:   destISSI,
-		SDSData:    sdsDataHex,
+	raw, err := hex.DecodeString(sdsDataHex)
+	if err != nil {
+		h.logger.Printf("federation: invalid local SDS hex: %v", err)
+		return
 	}
-	h.mesh.PrepareOutgoing(msg)
-	h.broadcastToAllPeers(msg)
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_SdsRelay{
+			SdsRelay: &federationv2pb.SdsRelay{
+				SourceIssi: sourceISSI,
+				DestIssi:   destISSI,
+				SdsData:    raw,
+			},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	h.broadcastToAllPeers(ctrl)
 }
 
 // FindPeerForISSI returns the peer that has the given ISSI, or nil.
@@ -900,12 +935,15 @@ func (h *Hub) sendUsersDBOffer(peer *Peer) {
 	baseURL = strings.TrimSuffix(baseURL, "/peer")
 	dbURL := baseURL + "/api/users.txt"
 
-	peer.SendJSON(&Message{
-		Type:             MsgUsersDBOffer,
-		Origin:           h.serverName,
-		UsersDBTimestamp: ts,
-		UsersDBURL:       dbURL,
-		UsersDBCount:     count,
+	_ = peer.SendControl(&federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_UsersDbOffer{
+			UsersDbOffer: &federationv2pb.UsersDbOffer{
+				Timestamp: ts,
+				Url:       dbURL,
+				Count:     uint32(count),
+			},
+		},
 	})
 }
 
@@ -932,26 +970,27 @@ func (h *Hub) handleUsersDBOffer(peer *Peer, msg *Message) {
 // sendPeerExchange sends our list of known peers to a peer.
 func (h *Hub) sendPeerExchange(peer *Peer) {
 	h.knownMu.RLock()
-	peers := make([]GossipPeer, 0, len(h.knownPeers)+1)
-	// Include ourselves so the other side knows our URL
+	gp := make([]*federationv2pb.GossipPeer, 0, len(h.knownPeers)+1)
 	if h.selfURL != "" {
-		peers = append(peers, GossipPeer{Name: h.serverName, URL: h.selfURL})
+		gp = append(gp, &federationv2pb.GossipPeer{Name: h.serverName, Url: h.selfURL})
 	}
-	for name, url := range h.knownPeers {
-		if name != peer.Name { // Don't tell a peer about itself
-			peers = append(peers, GossipPeer{Name: name, URL: url})
+	for name, u := range h.knownPeers {
+		if name != peer.Name {
+			gp = append(gp, &federationv2pb.GossipPeer{Name: name, Url: u})
 		}
 	}
 	h.knownMu.RUnlock()
 
-	if len(peers) > 0 {
-		peer.SendJSON(&Message{
-			Type:   MsgPeerExchange,
-			Origin: h.serverName,
-			Peers:  peers,
-		})
-		h.logger.Printf("federation: sent %d known peer(s) to %s", len(peers), peer.Name)
+	if len(gp) == 0 {
+		return
 	}
+	_ = peer.SendControl(&federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_PeerExchange{
+			PeerExchange: &federationv2pb.PeerExchange{Peers: gp},
+		},
+	})
+	h.logger.Printf("federation: sent %d known peer(s) to %s", len(gp), peer.Name)
 }
 
 // tryAddDiscoveredPeer adds a newly discovered peer and connects to it.
@@ -1119,32 +1158,45 @@ func (h *Hub) sendFullSync(peer *Peer) {
 		return
 	}
 	localSubs := h.handler.GetLocalSubscribers()
-	subscribers := make(map[string]SyncSubscriber, len(localSubs))
+	subs := make(map[string]*federationv2pb.SyncSubscriber, len(localSubs))
 	for issi, gssis := range localSubs {
-		subscribers[fmt.Sprintf("%d", issi)] = SyncSubscriber{GSSIs: gssis}
+		subs[fmt.Sprintf("%d", issi)] = &federationv2pb.SyncSubscriber{
+			Gssis: append([]uint32(nil), gssis...),
+		}
 	}
-	peer.SendJSON(&Message{
-		Type:        MsgSyncResponse,
-		Origin:      h.serverName,
-		Subscribers: subscribers,
+	_ = peer.SendControl(&federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_SyncResponse{
+			SyncResponse: &federationv2pb.SyncResponse{Subscribers: subs},
+		},
 	})
-	h.logger.Printf("federation: sent sync to %s (%d subscribers)", peer.Name, len(subscribers))
+	h.logger.Printf("federation: sent sync to %s (%d subscribers)", peer.Name, len(subs))
 }
 
-func (h *Hub) broadcastToAllPeers(msg *Message) {
+func (h *Hub) broadcastToAllPeers(ctrl *federationv2pb.Control) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, peer := range h.peers {
-		peer.SendJSON(msg)
+		_ = peer.SendControl(ctrl)
 	}
 }
 
-func (h *Hub) relayToPeers(msg *Message, excludeName string) {
+func (h *Hub) relayToPeers(ctrl *federationv2pb.Control, excludeName string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, peer := range h.peers {
 		if peer.Name != excludeName {
-			peer.SendJSON(msg)
+			_ = peer.SendControl(ctrl)
 		}
 	}
+}
+
+// relayMessageToPeers is a transitional helper used by the legacy
+// Message-based inbound path. Removed in Task 4.
+func (h *Hub) relayMessageToPeers(msg *Message, excludeName string) {
+	ctrl := messageToControl(msg)
+	if ctrl == nil {
+		return
+	}
+	h.relayToPeers(ctrl, excludeName)
 }
