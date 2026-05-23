@@ -745,10 +745,12 @@ func (h *Hub) handleCallStart(peer *Peer, ctrl *federationv2pb.Control, cs *fede
 	defer h.mu.RUnlock()
 	h.callMu.Lock()
 	defer h.callMu.Unlock()
+	seen := map[string]bool{peer.Name: true}
 	for _, p := range h.peers {
-		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
+		if seen[p.Name] || IsInPath(ctrl, p.Name) {
 			continue
 		}
+		seen[p.Name] = true
 		_ = p.SendControl(relay)
 		h.activeCalls[cs.GetUuid()][p.Name] = true
 	}
@@ -768,10 +770,12 @@ func (h *Hub) handleCallEnd(peer *Peer, ctrl *federationv2pb.Control, ce *federa
 	relay := h.mesh.PrepareRelay(ctrl)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	seen := map[string]bool{peer.Name: true}
 	for _, p := range h.peers {
-		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
+		if seen[p.Name] || IsInPath(ctrl, p.Name) {
 			continue
 		}
+		seen[p.Name] = true
 		_ = p.SendControl(relay)
 	}
 }
@@ -917,7 +921,12 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 	if h.activeCalls[callUUID] == nil {
 		h.activeCalls[callUUID] = make(map[string]bool)
 	}
+	seen := make(map[string]bool, len(h.peers))
 	for _, peer := range h.peers {
+		if seen[peer.Name] {
+			continue
+		}
+		seen[peer.Name] = true
 		_ = peer.SendControl(ctrl)
 		h.activeCalls[callUUID][peer.Name] = true
 	}
@@ -1374,20 +1383,37 @@ func (h *Hub) sendFullSync(peer *Peer) {
 	h.logger.Printf("federation: sent sync to %s (%d subscribers)", peer.Name, len(subs))
 }
 
+// broadcastToAllPeers sends ctrl once per distinct peer name. h.peers may
+// hold both an outgoing and an incoming Peer for the same remote (keyed
+// "name" and "name:in"); without dedup every broadcast would be delivered
+// twice, doubling control-plane traffic and the per-peer 256-slot send
+// buffer pressure.
 func (h *Hub) broadcastToAllPeers(ctrl *federationv2pb.Control) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	seen := make(map[string]bool, len(h.peers))
 	for _, peer := range h.peers {
+		if seen[peer.Name] {
+			continue
+		}
+		seen[peer.Name] = true
 		_ = peer.SendControl(ctrl)
 	}
 }
 
+// relayToPeers forwards ctrl to every peer except excludeName (the source)
+// and any peer already in ctrl.Path. The path check avoids enqueueing
+// messages the remote would just drop via mesh-dedup — important because
+// every queued-then-dropped message still costs a 256-slot buffer slot.
 func (h *Hub) relayToPeers(ctrl *federationv2pb.Control, excludeName string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	seen := map[string]bool{excludeName: true}
 	for _, peer := range h.peers {
-		if peer.Name != excludeName {
-			_ = peer.SendControl(ctrl)
+		if seen[peer.Name] || IsInPath(ctrl, peer.Name) {
+			continue
 		}
+		seen[peer.Name] = true
+		_ = peer.SendControl(ctrl)
 	}
 }
