@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	federationv2pb "github.com/freetetra/server/internal/federation/proto/v2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -199,17 +201,20 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		}
 
 		h.logger.Printf("federation: connecting to peer %s at %s", pc.Name, pc.URL)
-		target, err := normalizeRPCTarget(pc.URL)
+		target, secure, err := normalizeRPCTarget(pc.URL)
 		if err != nil {
 			// Config-level error — no amount of retrying fixes a malformed URL.
 			h.logger.Printf("federation: invalid peer target %s: %v", pc.URL, err)
 			return
 		}
 
-		conn, err := grpc.NewClient(
-			target,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
+		var creds credentials.TransportCredentials
+		if secure {
+			creds = credentials.NewTLS(&tls.Config{})
+		} else {
+			creds = insecure.NewCredentials()
+		}
+		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			h.logger.Printf("federation: failed to connect to %s: %v (retry in %s)", pc.Name, err, delay)
 			if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
@@ -408,21 +413,39 @@ func firstMD(md metadata.MD, key string) string {
 	return vals[0]
 }
 
-func normalizeRPCTarget(raw string) (string, error) {
+// normalizeRPCTarget parses a peer URL and returns the gRPC dial target plus
+// a flag indicating whether the dialer should use TLS. Supported forms:
+//
+//	host:port               → h2c, target as-is
+//	https://host[:port]      → TLS, default port 443
+//	grpcs://host[:port]      → TLS, default port 443
+//	http://host[:port]       → h2c, default port 80
+//	grpc://host[:port]       → h2c, default port 80
+func normalizeRPCTarget(raw string) (string, bool, error) {
 	if strings.Contains(raw, "://") {
 		u, err := url.Parse(raw)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if u.Host == "" {
-			return "", fmt.Errorf("empty host")
+			return "", false, fmt.Errorf("empty host")
 		}
-		return u.Host, nil
+		scheme := strings.ToLower(u.Scheme)
+		secure := scheme == "https" || scheme == "grpcs"
+		host := u.Host
+		if !strings.Contains(host, ":") {
+			if secure {
+				host += ":443"
+			} else {
+				host += ":80"
+			}
+		}
+		return host, secure, nil
 	}
 	if strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("empty target")
+		return "", false, fmt.Errorf("empty target")
 	}
-	return raw, nil
+	return raw, false, nil
 }
 
 func isIncompatibleGRPCEndpoint(err error) bool {
@@ -614,13 +637,18 @@ func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
 		h.handler.OnPeerVoiceFrame(peer.Name, callUUID, frameData)
 	}
 
-	// Mesh relay: forward to ALL other connected peers (not just call participants)
-	// This ensures voice reaches servers that are only indirectly connected
+	// Mesh relay: forward to ALL other connected peers (not just call
+	// participants) so voice reaches indirectly connected servers. Dedup
+	// by peer.Name — h.peers has two entries per peer (outgoing + incoming)
+	// and voice frames have no msg_id for receive-side dedup.
 	h.mu.RLock()
+	seen := map[string]bool{peer.Name: true}
 	for _, p := range h.peers {
-		if p.Name != peer.Name {
-			p.SendVoiceFrame(callUUID, frameData)
+		if seen[p.Name] {
+			continue
 		}
+		seen[p.Name] = true
+		p.SendVoiceFrame(callUUID, frameData)
 	}
 	h.mu.RUnlock()
 }
@@ -773,11 +801,19 @@ func (h *Hub) BroadcastCallEnd(callUUID string, cause uint8) {
 	h.broadcastToAllPeers(ctrl)
 }
 
-// BroadcastVoiceFrame sends a voice frame to all connected peers.
+// BroadcastVoiceFrame sends a voice frame to each connected peer name once.
+// h.peers stores outgoing and incoming connections to the same peer as
+// separate entries (keys "name" and "name:in"); voice frames carry no
+// msg_id so the receiver cannot dedup. Dedup by peer.Name at send time.
 func (h *Hub) BroadcastVoiceFrame(callUUID string, frameData []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	seen := make(map[string]bool, len(h.peers))
 	for _, peer := range h.peers {
+		if seen[peer.Name] {
+			continue
+		}
+		seen[peer.Name] = true
 		_ = peer.SendVoiceFrame(callUUID, frameData)
 	}
 }
