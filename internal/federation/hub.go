@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -388,16 +387,59 @@ func (h *Hub) Connect(stream grpc.BidiStreamingServer[federationv2pb.StreamFrame
 }
 
 func (h *Hub) handleControlMessage(peer *Peer, ctrl *federationv2pb.Control) {
-	msg := controlToMessage(ctrl)
-	if msg == nil {
+	if ctrl == nil {
 		return
 	}
-	b, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Printf("federation: invalid control payload from %s: %v", peer.Name, err)
-		return
+
+	// Mesh routing gate — preserves the exact set of message types treated
+	// as control-plane (origin-only check) by the legacy handleJSONMessage.
+	// NOTE: UsersDbOffer / UsersDbRequest fall into the default (data-plane)
+	// branch here, matching pre-refactor behavior. The sender does not call
+	// PrepareOutgoing on those messages, so TTL stays 0 and ShouldProcess
+	// drops them. That is a pre-existing bug in users-DB federation, not a
+	// regression introduced here; out of scope for this refactor.
+	switch ctrl.GetPayload().(type) {
+	case *federationv2pb.Control_Hello,
+		*federationv2pb.Control_SyncRequest,
+		*federationv2pb.Control_SyncResponse,
+		*federationv2pb.Control_PeerExchange:
+		if ctrl.GetOrigin() == h.serverName {
+			return
+		}
+	default:
+		if !h.mesh.ShouldProcess(ctrl) {
+			return
+		}
 	}
-	h.handleJSONMessage(peer, b)
+
+	switch p := ctrl.GetPayload().(type) {
+	case *federationv2pb.Control_Hello:
+		h.handleHello(peer, ctrl, p.Hello)
+	case *federationv2pb.Control_SyncRequest:
+		h.sendFullSync(peer)
+	case *federationv2pb.Control_SyncResponse:
+		h.handleSyncResponse(peer, p.SyncResponse)
+	case *federationv2pb.Control_UsersDbOffer:
+		h.handleUsersDBOffer(peer, p.UsersDbOffer)
+	case *federationv2pb.Control_UsersDbRequest:
+		h.sendUsersDBOffer(peer)
+	case *federationv2pb.Control_PeerExchange:
+		h.handlePeerExchange(peer, p.PeerExchange)
+	case *federationv2pb.Control_SubscriberUpdate:
+		h.handleSubscriberUpdate(peer, ctrl, p.SubscriberUpdate)
+	case *federationv2pb.Control_AffiliateUpdate:
+		h.handleAffiliateUpdate(peer, ctrl, p.AffiliateUpdate)
+	case *federationv2pb.Control_CallStart:
+		h.handleCallStart(peer, ctrl, p.CallStart)
+	case *federationv2pb.Control_CallEnd:
+		h.handleCallEnd(peer, ctrl, p.CallEnd)
+	case *federationv2pb.Control_SdsRelay:
+		h.handleSdsRelay(peer, ctrl, p.SdsRelay)
+	case *federationv2pb.Control_PositionSample:
+		h.handlePositionSample(peer, ctrl, p.PositionSample)
+	case *federationv2pb.Control_StationUpdate:
+		h.handleStationUpdate(peer, ctrl, p.StationUpdate)
+	}
 }
 
 func firstMD(md metadata.MD, key string) string {
@@ -441,202 +483,182 @@ func federationSubpathForKey(key string) string {
 	return "/federation/" + hex.EncodeToString(sum[:12])
 }
 
-// handleJSONMessage processes a JSON federation message.
-func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
-	var msg Message
-	if err := json.Unmarshal(data, &msg); err != nil {
-		h.logger.Printf("federation: invalid JSON from %s: %v", peer.Name, err)
+func (h *Hub) handleHello(peer *Peer, ctrl *federationv2pb.Control, hello *federationv2pb.Hello) {
+	h.logger.Printf("federation: hello from %s (version %d)", ctrl.GetOrigin(), ctrl.GetProtocolVersion())
+	if origin := ctrl.GetOrigin(); origin != "" && origin != peer.Name {
+		old := peer.Name
+		h.renamePeer(peer, origin)
+		h.logger.Printf("federation: renamed peer %s -> %s", old, origin)
+	}
+
+	// UDP-Voice-Handshake: if the peer advertises a UDP address + token,
+	// we can send voice frames over UDP. Also we now know our own
+	// outbound-token for this peer (= what we expect when they send to us)
+	// — that was generated and stored in buildHello.
+	if h.udpVoice != nil && hello.GetUdpAddr() != "" && hello.GetUdpToken() != "" {
+		h.udpInTokenMu.RLock()
+		myInToken := h.udpInTokens[peer.Name]
+		h.udpInTokenMu.RUnlock()
+		if myInToken == "" {
+			myInToken = NewToken()
+			h.udpInTokenMu.Lock()
+			h.udpInTokens[peer.Name] = myInToken
+			h.udpInTokenMu.Unlock()
+		}
+		h.udpVoice.RegisterPeer(peer.Name, hello.GetUdpAddr(), hello.GetUdpToken(), myInToken)
+	}
+
+	h.sendPeerExchange(peer)
+	h.sendUsersDBOffer(peer)
+}
+
+func (h *Hub) handleSyncResponse(peer *Peer, sr *federationv2pb.SyncResponse) {
+	for issiStr, info := range sr.GetSubscribers() {
+		var issi uint32
+		fmt.Sscanf(issiStr, "%d", &issi)
+		peer.RegisterISSI(issi)
+		peer.AffiliateISSI(issi, info.GetGssis())
+	}
+	h.logger.Printf("federation: synced %d subscribers from %s", len(sr.GetSubscribers()), peer.Name)
+}
+
+func (h *Hub) handleUsersDBOffer(peer *Peer, off *federationv2pb.UsersDbOffer) {
+	if h.handler == nil || off.GetUrl() == "" {
 		return
 	}
-
-	// Mesh routing: check if we should process this message
-	switch msg.Type {
-	case MsgHello, MsgSyncRequest, MsgSyncResponse, MsgPeerExchange:
-		// Control messages: simple origin check, no mesh routing
-		if msg.Origin == h.serverName {
-			return
-		}
-	default:
-		// Data messages: full mesh dedup/TTL/loop check
-		if !h.mesh.ShouldProcess(messageToControl(&msg)) {
-			return
+	ourTS, _ := h.handler.GetUsersDBInfo()
+	if ourTS == "" || off.GetTimestamp() > ourTS {
+		h.logger.Printf("federation: downloading users DB from %s (%d users, ts=%s)",
+			peer.Name, off.GetCount(), off.GetTimestamp())
+		if err := h.handler.DownloadUsersDBFrom(off.GetUrl()); err != nil {
+			h.logger.Printf("federation: users DB download failed: %v", err)
+		} else {
+			h.logger.Printf("federation: users DB updated from %s", peer.Name)
 		}
 	}
+}
 
-	switch msg.Type {
-	case MsgHello:
-		h.logger.Printf("federation: hello from %s (version %d)", msg.Origin, msg.Version)
-		peer.SetCapabilities(msg.Capabilities)
-		// Bootstrap peers are named from config (e.g. "peer-0"); after Hello
-		// the remote's real name becomes known. Rename + re-register so the
-		// gossip-based dedup (by name) doesn't create a duplicate connection
-		// to the same remote under its real identity.
-		if msg.Origin != "" && msg.Origin != peer.Name {
-			old := peer.Name
-			h.renamePeer(peer, msg.Origin)
-			h.logger.Printf("federation: renamed peer %s -> %s", old, msg.Origin)
+func (h *Hub) handlePeerExchange(peer *Peer, px *federationv2pb.PeerExchange) {
+	newPeers := 0
+	for _, gp := range px.GetPeers() {
+		if gp.GetName() == h.serverName || gp.GetUrl() == "" {
+			continue
 		}
-
-		// UDP-Voice-Handshake: wenn der Peer eine UDP-Adresse + Token sendet,
-		// koennen wir Voice-Frames per UDP zu ihm schicken. Plus wir kennen
-		// jetzt unser eigenes outbound-token fuer diesen Peer (= was wir
-		// erwarten wenn er an uns sendet) — das hatten wir im buildHello
-		// generiert und gespeichert.
-		if h.udpVoice != nil && msg.UDPAddr != "" && msg.UDPToken != "" {
-			h.udpInTokenMu.RLock()
-			myInToken := h.udpInTokens[peer.Name]
-			h.udpInTokenMu.RUnlock()
-			if myInToken == "" {
-				// Reconnect zwischen incoming/outgoing — generieren neu.
-				myInToken = NewToken()
-				h.udpInTokenMu.Lock()
-				h.udpInTokens[peer.Name] = myInToken
-				h.udpInTokenMu.Unlock()
-			}
-			// Wir registrieren: zum Senden an peer → msg.UDPAddr + msg.UDPToken.
-			// Zum Empfangen von peer → myInToken (was wir ihm via unser Hello
-			// sagen wird).
-			h.udpVoice.RegisterPeer(peer.Name, msg.UDPAddr, msg.UDPToken, myInToken)
+		if h.tryAddDiscoveredPeer(gp.GetName(), gp.GetUrl()) {
+			newPeers++
 		}
+	}
+	if newPeers > 0 {
+		h.logger.Printf("federation: discovered %d new peer(s) via %s", newPeers, peer.Name)
+	}
+}
 
-		h.sendPeerExchange(peer)
-		h.sendUsersDBOffer(peer)
+func (h *Hub) handleSubscriberUpdate(peer *Peer, ctrl *federationv2pb.Control, up *federationv2pb.SubscriberUpdate) {
+	switch up.GetAction() {
+	case federationv2pb.SubscriberUpdate_ACTION_REGISTER:
+		peer.RegisterISSI(up.GetIssi())
+		peer.AffiliateISSI(up.GetIssi(), up.GetGssis())
+		h.logger.Printf("federation: %s registered ISSI %d (GSSIs=%v) [ttl=%d path=%v]",
+			peer.Name, up.GetIssi(), up.GetGssis(), ctrl.GetTtl(), ctrl.GetPath())
+	case federationv2pb.SubscriberUpdate_ACTION_DEREGISTER:
+		peer.DeregisterISSI(up.GetIssi())
+		h.logger.Printf("federation: %s deregistered ISSI %d [ttl=%d]", peer.Name, up.GetIssi(), ctrl.GetTtl())
+	}
+	if h.mesh.ShouldRelay(ctrl) {
+		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
+	}
+}
 
-	case MsgSyncRequest:
-		h.sendFullSync(peer)
+func (h *Hub) handleAffiliateUpdate(peer *Peer, ctrl *federationv2pb.Control, up *federationv2pb.AffiliateUpdate) {
+	switch up.GetAction() {
+	case federationv2pb.AffiliateUpdate_ACTION_AFFILIATE:
+		peer.AffiliateISSI(up.GetIssi(), up.GetGssis())
+		h.logger.Printf("federation: %s affiliated ISSI %d -> GSSIs %v [ttl=%d]",
+			peer.Name, up.GetIssi(), up.GetGssis(), ctrl.GetTtl())
+	case federationv2pb.AffiliateUpdate_ACTION_DEAFFILIATE:
+		peer.DeaffiliateISSI(up.GetIssi(), up.GetGssis())
+		h.logger.Printf("federation: %s deaffiliated ISSI %d from GSSIs %v [ttl=%d]",
+			peer.Name, up.GetIssi(), up.GetGssis(), ctrl.GetTtl())
+	}
+	if h.mesh.ShouldRelay(ctrl) {
+		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
+	}
+}
 
-	case MsgSyncResponse:
-		for issiStr, info := range msg.Subscribers {
-			var issi uint32
-			fmt.Sscanf(issiStr, "%d", &issi)
-			peer.RegisterISSI(issi)
-			peer.AffiliateISSI(issi, info.GSSIs)
+func (h *Hub) handleCallStart(peer *Peer, ctrl *federationv2pb.Control, cs *federationv2pb.CallStart) {
+	if h.handler != nil {
+		h.handler.OnPeerCallStart(peer.Name, cs.GetUuid(), cs.GetSourceIssi(),
+			cs.GetDestGssi(), uint8(cs.GetPriority()), uint16(cs.GetService()))
+	}
+	h.callMu.Lock()
+	if h.activeCalls[cs.GetUuid()] == nil {
+		h.activeCalls[cs.GetUuid()] = make(map[string]bool)
+	}
+	h.callMu.Unlock()
+
+	if !h.mesh.ShouldRelay(ctrl) {
+		return
+	}
+	relay := h.mesh.PrepareRelay(ctrl)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, p := range h.peers {
+		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
+			continue
 		}
-		h.logger.Printf("federation: synced %d subscribers from %s", len(msg.Subscribers), peer.Name)
-
-	case MsgUsersDBOffer:
-		h.handleUsersDBOffer(peer, &msg)
-
-	case MsgUsersDBRequest:
-		h.sendUsersDBOffer(peer)
-
-	case MsgPeerExchange:
-		newPeers := 0
-		for _, gp := range msg.Peers {
-			if gp.Name == h.serverName || gp.URL == "" {
-				continue
-			}
-			if h.tryAddDiscoveredPeer(gp.Name, gp.URL) {
-				newPeers++
-			}
-		}
-		if newPeers > 0 {
-			h.logger.Printf("federation: discovered %d new peer(s) via %s", newPeers, peer.Name)
-		}
-
-	case MsgSubscriberUpdate:
-		switch msg.Action {
-		case "register":
-			peer.RegisterISSI(msg.ISSI)
-			peer.AffiliateISSI(msg.ISSI, msg.GSSIs)
-			h.logger.Printf("federation: %s registered ISSI %d (GSSIs=%v) [ttl=%d path=%v]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL, msg.Path)
-		case "deregister":
-			peer.DeregisterISSI(msg.ISSI)
-			h.logger.Printf("federation: %s deregistered ISSI %d [ttl=%d]", peer.Name, msg.ISSI, msg.TTL)
-		}
-		// Mesh relay to all other peers
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.relayMessageToPeers(relay, peer.Name)
-		}
-
-	case MsgAffiliateUpdate:
-		switch msg.Action {
-		case "affiliate":
-			peer.AffiliateISSI(msg.ISSI, msg.GSSIs)
-			h.logger.Printf("federation: %s affiliated ISSI %d -> GSSIs %v [ttl=%d]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL)
-		case "deaffiliate":
-			peer.DeaffiliateISSI(msg.ISSI, msg.GSSIs)
-			h.logger.Printf("federation: %s deaffiliated ISSI %d from GSSIs %v [ttl=%d]", peer.Name, msg.ISSI, msg.GSSIs, msg.TTL)
-		}
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.relayMessageToPeers(relay, peer.Name)
-		}
-
-	case MsgCallStart:
-		// Forward to local Brew service
-		if h.handler != nil {
-			h.handler.OnPeerCallStart(peer.Name, msg.UUID, msg.SourceISSI, msg.DestGSSI, msg.Priority, msg.Service)
-		}
-		// Track call and relay to all other peers (mesh-wide)
+		_ = p.SendControl(relay)
 		h.callMu.Lock()
-		if h.activeCalls[msg.UUID] == nil {
-			h.activeCalls[msg.UUID] = make(map[string]bool)
-		}
+		h.activeCalls[cs.GetUuid()][p.Name] = true
 		h.callMu.Unlock()
+	}
+}
 
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.mu.RLock()
-			for _, p := range h.peers {
-				if p.Name != peer.Name && !IsInPath(messageToControl(&msg), p.Name) {
-					p.SendJSON(relay)
-					h.callMu.Lock()
-					h.activeCalls[msg.UUID][p.Name] = true
-					h.callMu.Unlock()
-				}
-			}
-			h.mu.RUnlock()
-		}
+func (h *Hub) handleCallEnd(peer *Peer, ctrl *federationv2pb.Control, ce *federationv2pb.CallEnd) {
+	if h.handler != nil {
+		h.handler.OnPeerCallEnd(peer.Name, ce.GetUuid(), uint8(ce.GetCause()))
+	}
+	h.callMu.Lock()
+	delete(h.activeCalls, ce.GetUuid())
+	h.callMu.Unlock()
 
-	case MsgCallEnd:
-		// Forward to local Brew service
-		if h.handler != nil {
-			h.handler.OnPeerCallEnd(peer.Name, msg.UUID, msg.Cause)
+	if !h.mesh.ShouldRelay(ctrl) {
+		return
+	}
+	relay := h.mesh.PrepareRelay(ctrl)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, p := range h.peers {
+		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
+			continue
 		}
-		// Relay to all other peers
-		h.callMu.Lock()
-		delete(h.activeCalls, msg.UUID)
-		h.callMu.Unlock()
+		_ = p.SendControl(relay)
+	}
+}
 
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.mu.RLock()
-			for _, p := range h.peers {
-				if p.Name != peer.Name && !IsInPath(messageToControl(&msg), p.Name) {
-					p.SendJSON(relay)
-				}
-			}
-			h.mu.RUnlock()
-		}
+func (h *Hub) handleSdsRelay(peer *Peer, ctrl *federationv2pb.Control, sr *federationv2pb.SdsRelay) {
+	if h.handler != nil {
+		h.handler.OnPeerSDSRelay(peer.Name, sr.GetSourceIssi(), sr.GetDestIssi(), hex.EncodeToString(sr.GetSdsData()))
+	}
+	if h.mesh.ShouldRelay(ctrl) {
+		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
+	}
+}
 
-	case MsgSDSRelay:
-		if h.handler != nil {
-			h.handler.OnPeerSDSRelay(peer.Name, msg.SourceISSI, msg.DestISSI, msg.SDSData)
-		}
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.relayMessageToPeers(relay, peer.Name)
-		}
+func (h *Hub) handlePositionSample(peer *Peer, ctrl *federationv2pb.Control, ps *federationv2pb.PositionSample) {
+	if h.handler != nil {
+		h.handler.OnPeerPositionSample(peer.Name, ps.GetIssi(), ps.GetLat(), ps.GetLon(), ps.GetRepeater())
+	}
+	if h.mesh.ShouldRelay(ctrl) {
+		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
+	}
+}
 
-	case MsgPositionSample:
-		if h.handler != nil {
-			h.handler.OnPeerPositionSample(peer.Name, msg.ISSI, msg.Lat, msg.Lon, msg.Repeater)
-		}
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.relayMessageToPeers(relay, peer.Name)
-		}
-
-	case MsgStationUpdate:
-		if h.handler != nil {
-			h.handler.OnPeerStationUpdate(peer.Name, msg.Station)
-		}
-		if h.mesh.ShouldRelay(messageToControl(&msg)) {
-			relay := controlToMessage(h.mesh.PrepareRelay(messageToControl(&msg)))
-			h.relayMessageToPeers(relay, peer.Name)
-		}
+func (h *Hub) handleStationUpdate(peer *Peer, ctrl *federationv2pb.Control, su *federationv2pb.StationUpdate) {
+	if h.handler != nil && su.GetStation() != nil {
+		h.handler.OnPeerStationUpdate(peer.Name, su.GetStation().AsMap())
+	}
+	if h.mesh.ShouldRelay(ctrl) {
+		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
 	}
 }
 
@@ -947,26 +969,6 @@ func (h *Hub) sendUsersDBOffer(peer *Peer) {
 	})
 }
 
-// handleUsersDBOffer processes an offer from a peer.
-// Downloads if peer's DB is newer than ours.
-func (h *Hub) handleUsersDBOffer(peer *Peer, msg *Message) {
-	if h.handler == nil || msg.UsersDBURL == "" {
-		return
-	}
-	ourTS, _ := h.handler.GetUsersDBInfo()
-
-	// If we have no DB or theirs is newer, download
-	if ourTS == "" || msg.UsersDBTimestamp > ourTS {
-		h.logger.Printf("federation: downloading users DB from %s (%d users, ts=%s)",
-			peer.Name, msg.UsersDBCount, msg.UsersDBTimestamp)
-		if err := h.handler.DownloadUsersDBFrom(msg.UsersDBURL); err != nil {
-			h.logger.Printf("federation: users DB download failed: %v", err)
-		} else {
-			h.logger.Printf("federation: users DB updated from %s", peer.Name)
-		}
-	}
-}
-
 // sendPeerExchange sends our list of known peers to a peer.
 func (h *Hub) sendPeerExchange(peer *Peer) {
 	h.knownMu.RLock()
@@ -1189,14 +1191,4 @@ func (h *Hub) relayToPeers(ctrl *federationv2pb.Control, excludeName string) {
 			_ = peer.SendControl(ctrl)
 		}
 	}
-}
-
-// relayMessageToPeers is a transitional helper used by the legacy
-// Message-based inbound path. Removed in Task 4.
-func (h *Hub) relayMessageToPeers(msg *Message, excludeName string) {
-	ctrl := messageToControl(msg)
-	if ctrl == nil {
-		return
-	}
-	h.relayToPeers(ctrl, excludeName)
 }
