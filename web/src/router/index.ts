@@ -6,7 +6,9 @@ const routes: RouteRecordRaw[] = [
   { path: "/live", name: "live", component: () => import("../views/LivePage.vue") },
   { path: "/map", name: "map", component: () => import("../views/MapPage.vue") },
   { path: "/ui", name: "admin", component: () => import("../views/AdminDashboard.vue") },
-  { path: "/ui/legacy", name: "legacy", component: () => import("../views/LegacyVuetifyUI.vue") },
+  // /ui/legacy (the Vuetify SDS console) is intentionally not mounted yet.
+  // The Go binary continues to serve it from internal/service/dashboard_ui_vuetify.html
+  // until it is ported in a follow-up PR. See the plan for details.
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 

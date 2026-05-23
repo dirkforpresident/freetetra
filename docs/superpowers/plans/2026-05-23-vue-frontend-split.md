@@ -172,9 +172,12 @@ Net Go LOC removed: ~2400 across `public_page.go`, `live_page.go`, `mitmachen_pa
 
 ---
 
-## 6. Still-open question
+## 6. Resolved: `/ui/legacy` deferred to a follow-up PR
 
-- **Drop `/ui/legacy` during phase 3, or keep it as a Vue route for parity?** Defer until the new `AdminDashboard.vue` is in. If feature parity holds, delete it; if not, keep `LegacyVuetifyUI.vue` mounted at `/ui/legacy` as a fallback.
+- The new `AdminDashboard.vue` is read-only monitoring. It does NOT include the SDS console / callout-thread / virtual-endpoint write surface that lives in `dashboard_ui_vuetify.html`.
+- Porting the legacy file (~1155 LOC of inline CDN-Vue, including the multi-step callout flow logic) is decoupled from this branch.
+- For this branch: the `/ui/legacy` Vue route is **dropped**. The Go binary continues to serve [internal/service/dashboard_ui_vuetify.html](../../../internal/service/dashboard_ui_vuetify.html) at `/ui/legacy` until the port lands in a separate PR.
+- Phase 4 of this plan keeps `dashboard_ui_vuetify.html`, [dashboard_ui_assets.go](../../../internal/service/dashboard_ui_assets.go), and `handleDashboardUI` in place — only the four read-only HTML pages get deleted. The follow-up PR can then delete them alongside the SDS console port.
 
 ---
 
