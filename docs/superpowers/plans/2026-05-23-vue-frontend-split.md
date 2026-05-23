@@ -108,12 +108,12 @@ web/                        # standalone Vue 3 project, own package.json
 
 ### Resolved: build-flag selectable
 
-Two Go build tags drive a small `web_assets.go` shim:
+A small `web` Go package (sibling of `internal/`) exposes a `WebFS() (fs.FS, error)` symbol that the service consumes. Which file backs it is controlled by a build tag:
 
-- **`web_embed`** (default) — `//go:embed all:web/dist` is compiled in; the binary serves the SPA from the embedded FS. This is what `go build ./cmd/tetra-brew` produces.
-- **`!web_embed`** — the shim instead reads from a directory at runtime, path set by `--web-root /var/lib/freetetra/web` (or `WEB_ROOT=…` env). For operators who want to swap UI without rebuilding, or who proxy from nginx and don't want the binary serving static files at all.
+- **`!web_embed`** (default — what plain `go build` produces) — `WebFS()` returns `os.DirFS($web-root)` where `$web-root` comes from `--web-root /path/to/web/dist` (or `WEB_ROOT=...` env). If neither is set, the handler returns 404 and a hint to enable embedded mode. Lets a fresh-clone developer `go build ./...` without ever touching node.
+- **`web_embed`** — `//go:embed all:dist` is compiled in; `WebFS()` returns the embedded FS. This is what the Dockerfile builds after running `npm run build`. Single binary, no `--web-root` needed at runtime.
 
-The handler that backs `/` (and all SPA fallback) lives in a new `internal/service/web_assets_embed.go` (with the `//go:build web_embed` tag) and `internal/service/web_assets_dir.go` (with `//go:build !web_embed`). Both expose the same `webAssetsFS() fs.FS` symbol; the rest of the service is build-tag-agnostic.
+The handler that serves the SPA (with `try_files`-style fallback to `index.html`) lives in [internal/service/web_assets.go](../../../internal/service/web_assets.go) and is build-tag-agnostic — it just consumes `WebFS()`.
 
 Dev workflow is independent of the prod choice: `npm run dev` in `web/` runs Vite with `server.proxy` forwarding `/api`, `/lang`, `/brew`, `/telemetry`, `/ws` to `localhost:8080`. Devs never embed.
 

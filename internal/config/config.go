@@ -14,6 +14,11 @@ type Config struct {
 	UserAgent      string
 	ReconnectDelay time.Duration
 
+	// WebRoot points the Go server at a built Vue SPA on disk so it can
+	// serve /spa/ (Phase 5) and / (after Phase 4 deletion). Ignored when
+	// the binary is built with -tags web_embed, where the SPA is baked in.
+	WebRoot string
+
 	Server   ServerConfig
 	Client   BrewClientConfig
 	MQTT     MQTTConfig
@@ -203,6 +208,7 @@ func LoadFromEnv() (Config, error) {
 		HTTPListenAddr: env("HTTP_LISTEN_ADDR", ":8080"),
 		UserAgent:      env("USER_AGENT", "tetra-brew-backend/0.1"),
 		ReconnectDelay: envDuration("RECONNECT_DELAY", 2*time.Second),
+		WebRoot:        env("WEB_ROOT", ""),
 		Server: ServerConfig{
 			Path:         normalizePath(env("BREW_SERVER_PATH", "/brew")),
 			Realm:        env("BREW_SERVER_REALM", "TETRA Homebrew"),
