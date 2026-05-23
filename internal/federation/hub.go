@@ -228,7 +228,14 @@ func (h *Hub) buildHello(peerName string) *Message {
 }
 
 // maintainOutgoingPeer keeps a persistent connection to an outgoing peer.
+// Reconnects with exponential backoff: 10s → 20s → 40s → … capped at 15min.
+// Backoff resets after a stream is successfully established.
 func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
+	const (
+		baseDelay = 10 * time.Second
+		maxDelay  = 15 * time.Minute
+	)
+	delay := baseDelay
 	for {
 		select {
 		case <-ctx.Done():
@@ -239,6 +246,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		h.logger.Printf("federation: connecting to peer %s at %s", pc.Name, pc.URL)
 		target, err := normalizeRPCTarget(pc.URL)
 		if err != nil {
+			// Config-level error — no amount of retrying fixes a malformed URL.
 			h.logger.Printf("federation: invalid peer target %s: %v", pc.URL, err)
 			return
 		}
@@ -248,13 +256,11 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 		if err != nil {
-			h.logger.Printf("federation: failed to connect to %s: %v", pc.Name, err)
-			select {
-			case <-ctx.Done():
+			h.logger.Printf("federation: failed to connect to %s: %v (retry in %s)", pc.Name, err, delay)
+			if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
 				return
-			case <-time.After(10 * time.Second):
-				continue
 			}
+			continue
 		}
 
 		callCtx, cancel := context.WithCancel(ctx)
@@ -267,22 +273,22 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		if err != nil {
 			cancel()
 			_ = conn.Close()
-			h.logger.Printf("federation: failed to open stream to %s: %v", pc.Name, err)
 			if isIncompatibleGRPCEndpoint(err) {
-				h.logger.Printf("federation: peer %s is not a compatible gRPC endpoint, stopping reconnect loop", pc.Name)
+				h.logger.Printf("federation: peer %s is not a compatible gRPC endpoint (likely reverse-proxy not h2c): %v (retry in %s)", pc.Name, err, delay)
+			} else {
+				h.logger.Printf("federation: failed to open stream to %s: %v (retry in %s)", pc.Name, err, delay)
+			}
+			if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
 				return
 			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(10 * time.Second):
-				continue
-			}
+			continue
 		}
 
 		peer := newPeer(pc.Name, "outgoing", stream, cancel, h.logger)
 		h.registerPeer(peer)
 		h.logger.Printf("federation: connected to %s", pc.Name)
+		// A successful stream means the endpoint is healthy — reset backoff.
+		delay = baseDelay
 
 		peer.SendJSON(h.buildHello(pc.Name))
 		h.sendFullSync(peer)
@@ -293,14 +299,33 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 
 		// Cleanup and reconnect
 		h.unregisterPeer(peer)
-		h.logger.Printf("federation: reconnecting to %s in 10s...", pc.Name)
+		h.logger.Printf("federation: reconnecting to %s in %s...", pc.Name, delay)
 
-		select {
-		case <-ctx.Done():
+		if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
 			return
-		case <-time.After(10 * time.Second):
 		}
 	}
+}
+
+// waitBackoff sleeps for *delay, then doubles it up to max. Returns false if
+// the context was canceled during the sleep. delay is mutated in place so the
+// caller can reset it on success.
+func waitBackoff(ctx context.Context, delay *time.Duration, base, max time.Duration) bool {
+	current := *delay
+	if current < base {
+		current = base
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(current):
+	}
+	next := current * 2
+	if next > max {
+		next = max
+	}
+	*delay = next
+	return true
 }
 
 // readLoop reads messages from a peer.
