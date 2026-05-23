@@ -16,6 +16,8 @@ type MeshRouter struct {
 }
 
 const (
+	// MaxTTL is the maximum number of hops a federation message can travel.
+	MaxTTL              = 10
 	deduplicationWindow = 30 * time.Second
 	cleanupInterval     = 10 * time.Second
 )

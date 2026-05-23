@@ -24,6 +24,11 @@ const (
 	federationSubpathHeader = "x-brew-subpath"
 )
 
+const (
+	// ProtocolVersion advertised in the Hello handshake.
+	ProtocolVersion = 2
+)
+
 // PeerConfig is the configuration for a federation peer.
 type PeerConfig struct {
 	Name string `json:"name"`

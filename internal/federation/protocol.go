@@ -28,12 +28,6 @@ const (
 	CapabilityTypedProtoV2Draft = "typed-proto-v2-draft"
 )
 
-// ProtocolVersion is the federation protocol version.
-const ProtocolVersion = 2
-
-// MaxTTL is the maximum number of hops a message can travel.
-const MaxTTL = 10
-
 // Message is the envelope for all federation JSON messages.
 type Message struct {
 	Type         string   `json:"type"`
