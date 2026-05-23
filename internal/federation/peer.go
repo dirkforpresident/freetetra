@@ -16,7 +16,6 @@ type Peer struct {
 	mu           sync.RWMutex
 	stream       rpcStream
 	cancel       context.CancelFunc
-	capabilities []string
 
 	// Remote subscriber state
 	issis            map[uint32]bool            // ISSIs registered on this peer
@@ -39,36 +38,12 @@ func newPeer(name, direction string, stream rpcStream, cancel context.CancelFunc
 		Direction:        direction,
 		stream:           stream,
 		cancel:           cancel,
-		capabilities:     make([]string, 0),
 		issis:            make(map[uint32]bool),
 		gssiAffiliations: make(map[uint32]map[uint32]bool),
 		send:             make(chan *federationv2pb.StreamFrame, 256),
 		done:             make(chan struct{}),
 		logger:           logger,
 	}
-}
-
-func (p *Peer) SetCapabilities(caps []string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.capabilities = append([]string(nil), caps...)
-}
-
-func (p *Peer) Capabilities() []string {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return append([]string(nil), p.capabilities...)
-}
-
-func (p *Peer) SupportsCapability(cap string) bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	for _, c := range p.capabilities {
-		if c == cap {
-			return true
-		}
-	}
-	return false
 }
 
 // controlPayloadKind returns a short string describing which oneof case
