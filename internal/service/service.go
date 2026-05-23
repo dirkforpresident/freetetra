@@ -1109,7 +1109,8 @@ func shouldTrackCallState(state uint8) bool {
 
 func shouldReleaseCallState(state uint8) bool {
 	switch state {
-	case brew.CallStateCallRelease,
+	case brew.CallStateGroupIdle,
+		brew.CallStateCallRelease,
 		brew.CallStateSetupReject,
 		brew.CallStatePDPRelease,
 		brew.CallStatePDPReject:
