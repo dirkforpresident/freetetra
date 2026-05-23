@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	federationv2pb "github.com/freetetra/server/internal/federation/proto/v2"
 )
 
 // MeshRouter handles message deduplication, TTL, and multi-hop relay.
@@ -16,6 +18,8 @@ type MeshRouter struct {
 }
 
 const (
+	// MaxTTL is the maximum number of hops a federation message can travel.
+	MaxTTL              = 10
 	deduplicationWindow = 30 * time.Second
 	cleanupInterval     = 10 * time.Second
 )
@@ -34,77 +38,65 @@ func NewMessageID() string {
 	return uuid.New().String()[:8]
 }
 
-// PrepareOutgoing sets mesh fields on a new outgoing message.
-func (mr *MeshRouter) PrepareOutgoing(msg *Message) {
-	if msg.MsgID == "" {
-		msg.MsgID = NewMessageID()
+// PrepareOutgoing sets mesh fields on a new outgoing control message.
+func (mr *MeshRouter) PrepareOutgoing(ctrl *federationv2pb.Control) {
+	if ctrl.GetMsgId() == "" {
+		ctrl.MsgId = NewMessageID()
 	}
-	if msg.TTL == 0 {
-		msg.TTL = MaxTTL
+	if ctrl.GetTtl() == 0 {
+		ctrl.Ttl = int32(MaxTTL)
 	}
-	if msg.Path == nil {
-		msg.Path = []string{mr.serverName}
+	if len(ctrl.GetPath()) == 0 {
+		ctrl.Path = []string{mr.serverName}
 	}
-	// Mark as seen so we don't process our own message if it comes back
-	mr.markSeen(msg.MsgID)
+	mr.markSeen(ctrl.GetMsgId())
 }
 
-// ShouldProcess checks if an incoming message should be processed.
-// Returns false if:
-// - We originated it (loop)
-// - We already processed it (dedup)
-// - TTL is exhausted
-// - We are in the path (loop)
-func (mr *MeshRouter) ShouldProcess(msg *Message) bool {
-	// Originated by us
-	if msg.Origin == mr.serverName {
+// ShouldProcess checks if an incoming control message should be processed.
+func (mr *MeshRouter) ShouldProcess(ctrl *federationv2pb.Control) bool {
+	if ctrl.GetOrigin() == mr.serverName {
 		return false
 	}
-
-	// TTL exhausted
-	if msg.TTL <= 0 {
+	if ctrl.GetTtl() <= 0 {
 		return false
 	}
-
-	// Already in path (loop detection)
-	for _, hop := range msg.Path {
+	for _, hop := range ctrl.GetPath() {
 		if hop == mr.serverName {
 			return false
 		}
 	}
-
-	// Already seen (deduplication)
-	if msg.MsgID != "" && mr.alreadySeen(msg.MsgID) {
+	if ctrl.GetMsgId() != "" && mr.alreadySeen(ctrl.GetMsgId()) {
 		return false
 	}
-
-	// Mark as seen
-	if msg.MsgID != "" {
-		mr.markSeen(msg.MsgID)
+	if ctrl.GetMsgId() != "" {
+		mr.markSeen(ctrl.GetMsgId())
 	}
-
 	return true
 }
 
-// PrepareRelay prepares a message for relaying to the next hop.
-// Returns a copy with decremented TTL and updated path.
-func (mr *MeshRouter) PrepareRelay(msg *Message) *Message {
-	relay := *msg
-	relay.TTL = msg.TTL - 1
-	relay.Path = make([]string, len(msg.Path)+1)
-	copy(relay.Path, msg.Path)
-	relay.Path[len(msg.Path)] = mr.serverName
-	return &relay
+// PrepareRelay returns a relay copy with decremented TTL and updated path.
+func (mr *MeshRouter) PrepareRelay(ctrl *federationv2pb.Control) *federationv2pb.Control {
+	newPath := make([]string, len(ctrl.GetPath())+1)
+	copy(newPath, ctrl.GetPath())
+	newPath[len(ctrl.GetPath())] = mr.serverName
+	return &federationv2pb.Control{
+		Origin:          ctrl.GetOrigin(),
+		ProtocolVersion: ctrl.GetProtocolVersion(),
+		MsgId:           ctrl.GetMsgId(),
+		Ttl:             ctrl.GetTtl() - 1,
+		Path:            newPath,
+		Payload:         ctrl.GetPayload(),
+	}
 }
 
-// ShouldRelay checks if a message should be forwarded to other peers.
-func (mr *MeshRouter) ShouldRelay(msg *Message) bool {
-	return msg.TTL > 1
+// ShouldRelay checks if a control message should be forwarded further.
+func (mr *MeshRouter) ShouldRelay(ctrl *federationv2pb.Control) bool {
+	return ctrl.GetTtl() > 1
 }
 
 // IsInPath checks if a server name is in the message path.
-func IsInPath(msg *Message, serverName string) bool {
-	for _, hop := range msg.Path {
+func IsInPath(ctrl *federationv2pb.Control, serverName string) bool {
+	for _, hop := range ctrl.GetPath() {
 		if hop == serverName {
 			return true
 		}

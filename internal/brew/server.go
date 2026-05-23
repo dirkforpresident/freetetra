@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+	"google.golang.org/grpc"
 
 	"github.com/freetetra/server/internal/config"
 )
@@ -36,6 +39,7 @@ type Server struct {
 	handler EventHandler
 
 	httpServer *http.Server
+	grpcServer *grpc.Server
 	upgrader   websocket.Upgrader
 
 	clientsMu sync.RWMutex
@@ -47,11 +51,11 @@ type Server struct {
 	tokenMu sync.Mutex
 	tokens  map[string]time.Time
 
-	extraHandlers  []httpHandlerRegistration
-	authVerifier   AuthVerifier
-	authChecker    func(ip string) bool // returns false if IP is banned
-	authOnFailure  func(ip string)      // called on auth failure
-	authOnSuccess  func(ip string)      // called on auth success
+	extraHandlers []httpHandlerRegistration
+	authVerifier  AuthVerifier
+	authChecker   func(ip string) bool // returns false if IP is banned
+	authOnFailure func(ip string)      // called on auth failure
+	authOnSuccess func(ip string)      // called on auth success
 }
 
 type httpHandlerRegistration struct {
@@ -89,9 +93,20 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc(h.pattern, h.handler)
 	}
 
+	handler := http.Handler(mux)
+	if s.grpcServer != nil {
+		handler = h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isGRPCRequest(r) {
+				s.grpcServer.ServeHTTP(w, r)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		}), &http2.Server{})
+	}
+
 	s.httpServer = &http.Server{
 		Addr:    s.cfg.HTTPListenAddr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	listener, err := net.Listen("tcp", s.cfg.HTTPListenAddr)
@@ -102,6 +117,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
+		if s.grpcServer != nil {
+			s.grpcServer.GracefulStop()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.httpServer.Shutdown(shutdownCtx)
@@ -112,6 +130,19 @@ func (s *Server) Start(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// SetGRPCServer installs a gRPC server that should share the HTTP listener.
+func (s *Server) SetGRPCServer(server *grpc.Server) {
+	s.grpcServer = server
+}
+
+func isGRPCRequest(r *http.Request) bool {
+	if r.ProtoMajor < 2 {
+		return false
+	}
+	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("content-type")))
+	return strings.HasPrefix(ct, "application/grpc")
 }
 
 func (s *Server) BroadcastToGroup(gssi uint32, payload []byte, excludeClientID string) int {

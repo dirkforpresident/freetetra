@@ -1,0 +1,50 @@
+services:
+  loopback-node:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-freecat-loopback-node
+    env_file:
+      - .env.loopback-node
+    ports:
+      - "8201:8091"
+      - "8202:8202"
+    restart: unless-stopped
+
+  loopback-echo:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-freecat-loopback-echo
+    entrypoint: ["/app/tetra-brew-echo"]
+    environment:
+      BREW_MODE: echo
+      BREW_CLIENT_BASE_URL: http://loopback-node:8091
+      BREW_CLIENT_USERNAME: loopback
+      BREW_CLIENT_PASSWORD: blafablafa
+      ECHO_TALKGROUP: "25"
+      ECHO_SOURCE_ISSI: "899025"
+      ECHO_PLAYBACK_DELAY: "300ms"
+    depends_on:
+      - loopback-node
+    restart: unless-stopped
+
+  loopback-webradio:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-freecat-loopback-webradio
+    entrypoint: ["/app/tetra-brew-webradio"]
+    environment:
+      BREW_MODE: webradio
+      BREW_CLIENT_BASE_URL: http://loopback-node:8091
+      BREW_CLIENT_USERNAME: loopback
+      BREW_CLIENT_PASSWORD: blafablafa
+      WEBRADIO_ENABLED: "true"
+      WEBRADIO_STREAM_URL: "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3"
+      WEBRADIO_TALKGROUP: "13"
+      WEBRADIO_SOURCE_ISSI: "899013"
+      WEBRADIO_ENCODER_BIN: /app/tetra-acelp-stdio
+    depends_on:
+      - loopback-node
+    restart: unless-stopped
