@@ -71,6 +71,62 @@ func (p *Peer) SupportsCapability(cap string) bool {
 	return false
 }
 
+// controlPayloadKind returns a short string describing which oneof case
+// is set on a Control. Used for log context.
+func controlPayloadKind(ctrl *federationv2pb.Control) string {
+	switch ctrl.GetPayload().(type) {
+	case *federationv2pb.Control_Hello:
+		return "hello"
+	case *federationv2pb.Control_SubscriberUpdate:
+		return "subscriber_update"
+	case *federationv2pb.Control_AffiliateUpdate:
+		return "affiliate_update"
+	case *federationv2pb.Control_CallStart:
+		return "call_start"
+	case *federationv2pb.Control_CallEnd:
+		return "call_end"
+	case *federationv2pb.Control_SdsRelay:
+		return "sds_relay"
+	case *federationv2pb.Control_SyncRequest:
+		return "sync_request"
+	case *federationv2pb.Control_SyncResponse:
+		return "sync_response"
+	case *federationv2pb.Control_PeerExchange:
+		return "peer_exchange"
+	case *federationv2pb.Control_UsersDbOffer:
+		return "usersdb_offer"
+	case *federationv2pb.Control_UsersDbRequest:
+		return "usersdb_request"
+	case *federationv2pb.Control_PositionSample:
+		return "position_sample"
+	case *federationv2pb.Control_StationUpdate:
+		return "station_update"
+	default:
+		return "unknown"
+	}
+}
+
+// SendControl enqueues a typed control message for delivery to the peer.
+// This is the protobuf-native send path; SendJSON is the legacy adapter
+// kept around during the transition off the Message struct.
+func (p *Peer) SendControl(ctrl *federationv2pb.Control) error {
+	if ctrl == nil {
+		return nil
+	}
+	frame := &federationv2pb.StreamFrame{
+		Body: &federationv2pb.StreamFrame_Control{Control: ctrl},
+	}
+	select {
+	case p.send <- frame:
+		return nil
+	case <-p.done:
+		return context.Canceled
+	default:
+		p.logger.Printf("federation: send buffer full for peer %s, dropping control %s", p.Name, controlPayloadKind(ctrl))
+		return nil
+	}
+}
+
 // SendJSON sends a JSON federation message to the peer.
 func (p *Peer) SendJSON(msg *Message) error {
 	ctrl := messageToControl(msg)
@@ -99,7 +155,9 @@ func (p *Peer) SendBinary(data []byte) error {
 	return p.SendVoiceFrame(string(data[:36]), data[36:])
 }
 
-// SendVoiceFrame sends a typed v2 voice frame to the peer.
+// SendVoiceFrame sends a typed v2 voice frame to the peer. Drops silently
+// on a full buffer rather than logging — voice is high-frequency (3-4
+// frames per second per active call) and a log per drop would flood.
 func (p *Peer) SendVoiceFrame(callUUID string, frameData []byte) error {
 	frame := &federationv2pb.StreamFrame{
 		Body: &federationv2pb.StreamFrame_VoiceFrame{VoiceFrame: &federationv2pb.VoiceFrame{
