@@ -23,6 +23,11 @@ const (
 	MsgStationUpdate    = "station_update"    // BlueStation-Heartbeat fuer Stations-Federation
 )
 
+const (
+	CapabilityGRPCEnvelopeV1    = "grpc-envelope-v1"
+	CapabilityTypedProtoV2Draft = "typed-proto-v2-draft"
+)
+
 // ProtocolVersion is the federation protocol version.
 const ProtocolVersion = 2
 
@@ -31,9 +36,10 @@ const MaxTTL = 10
 
 // Message is the envelope for all federation JSON messages.
 type Message struct {
-	Type    string `json:"type"`
-	Origin  string `json:"origin"`  // Server name that originated this message
-	Version int    `json:"version,omitempty"`
+	Type         string   `json:"type"`
+	Origin       string   `json:"origin"` // Server name that originated this message
+	Version      int      `json:"version,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
 
 	// UDP-Voice-Plane handshake (sent in Hello):
 	//   UDPAddr  = sender's public UDP address ("host:port")

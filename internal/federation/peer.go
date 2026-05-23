@@ -1,12 +1,11 @@
 package federation
 
 import (
-	"encoding/json"
+	"context"
 	"log"
 	"sync"
-	"time"
 
-	"github.com/gorilla/websocket"
+	federationv2pb "github.com/freetetra/server/internal/federation/proto/v2"
 )
 
 // Peer represents a connected federation peer (another Brew server).
@@ -14,42 +13,78 @@ type Peer struct {
 	Name      string
 	Direction string // "outgoing" or "incoming"
 
-	mu   sync.RWMutex
-	conn *websocket.Conn
+	mu           sync.RWMutex
+	stream       rpcStream
+	cancel       context.CancelFunc
+	capabilities []string
 
 	// Remote subscriber state
 	issis            map[uint32]bool            // ISSIs registered on this peer
 	gssiAffiliations map[uint32]map[uint32]bool // GSSI -> set of ISSIs
 
-	send   chan []byte
+	send   chan *federationv2pb.StreamFrame
 	done   chan struct{}
 	logger *log.Logger
 }
 
-func newPeer(name, direction string, conn *websocket.Conn, logger *log.Logger) *Peer {
+type rpcStream interface {
+	Send(*federationv2pb.StreamFrame) error
+	Recv() (*federationv2pb.StreamFrame, error)
+	Context() context.Context
+}
+
+func newPeer(name, direction string, stream rpcStream, cancel context.CancelFunc, logger *log.Logger) *Peer {
 	return &Peer{
 		Name:             name,
 		Direction:        direction,
-		conn:             conn,
+		stream:           stream,
+		cancel:           cancel,
+		capabilities:     make([]string, 0),
 		issis:            make(map[uint32]bool),
 		gssiAffiliations: make(map[uint32]map[uint32]bool),
-		send:             make(chan []byte, 256),
+		send:             make(chan *federationv2pb.StreamFrame, 256),
 		done:             make(chan struct{}),
 		logger:           logger,
 	}
 }
 
+func (p *Peer) SetCapabilities(caps []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.capabilities = append([]string(nil), caps...)
+}
+
+func (p *Peer) Capabilities() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return append([]string(nil), p.capabilities...)
+}
+
+func (p *Peer) SupportsCapability(cap string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, c := range p.capabilities {
+		if c == cap {
+			return true
+		}
+	}
+	return false
+}
+
 // SendJSON sends a JSON federation message to the peer.
 func (p *Peer) SendJSON(msg *Message) error {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
+	ctrl := messageToControl(msg)
+	if ctrl == nil {
+		return nil
+	}
+	frame := &federationv2pb.StreamFrame{
+		Body: &federationv2pb.StreamFrame_Control{Control: ctrl},
 	}
 	select {
-	case p.send <- data:
+	case p.send <- frame:
 		return nil
 	case <-p.done:
-		return websocket.ErrCloseSent
+		return context.Canceled
 	default:
 		p.logger.Printf("federation: send buffer full for peer %s, dropping message type=%s", p.Name, msg.Type)
 		return nil
@@ -58,11 +93,25 @@ func (p *Peer) SendJSON(msg *Message) error {
 
 // SendBinary sends raw binary data to the peer (for voice frames).
 func (p *Peer) SendBinary(data []byte) error {
+	if len(data) < 36 {
+		return nil
+	}
+	return p.SendVoiceFrame(string(data[:36]), data[36:])
+}
+
+// SendVoiceFrame sends a typed v2 voice frame to the peer.
+func (p *Peer) SendVoiceFrame(callUUID string, frameData []byte) error {
+	frame := &federationv2pb.StreamFrame{
+		Body: &federationv2pb.StreamFrame_VoiceFrame{VoiceFrame: &federationv2pb.VoiceFrame{
+			CallUuid:  callUUID,
+			FrameData: frameData,
+		}},
+	}
 	select {
-	case p.send <- data:
+	case p.send <- frame:
 		return nil
 	case <-p.done:
-		return websocket.ErrCloseSent
+		return context.Canceled
 	default:
 		return nil
 	}
@@ -182,42 +231,27 @@ func (p *Peer) Close() {
 	default:
 		close(p.done)
 	}
-	if p.conn != nil {
-		p.conn.Close()
+	if p.cancel != nil {
+		p.cancel()
 	}
 }
 
-// writeLoop pumps messages from the send channel to the WebSocket.
+// writeLoop pumps messages from the send channel to the RPC stream.
 func (p *Peer) writeLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
 	for {
 		select {
-		case data, ok := <-p.send:
+		case env, ok := <-p.send:
 			if !ok {
 				return
 			}
-			// Determine message type: JSON (text) or binary
-			msgType := websocket.TextMessage
-			if len(data) > 0 && data[0] != '{' && data[0] != '[' {
-				msgType = websocket.BinaryMessage
-			}
-			p.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := p.conn.WriteMessage(msgType, data); err != nil {
+			if err := p.stream.Send(env); err != nil {
 				p.logger.Printf("federation: write to %s failed: %v", p.Name, err)
 				return
 			}
-			p.conn.SetWriteDeadline(time.Time{})
-
-		case <-ticker.C:
-			p.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := p.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-			p.conn.SetWriteDeadline(time.Time{})
 
 		case <-p.done:
+			return
+		case <-p.stream.Context().Done():
 			return
 		}
 	}

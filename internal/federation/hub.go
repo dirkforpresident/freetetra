@@ -2,15 +2,26 @@ package federation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
-	"net/http"
+	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	federationv2pb "github.com/freetetra/server/internal/federation/proto/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+)
+
+const (
+	federationSubpathHeader = "x-brew-subpath"
 )
 
 // PeerConfig is the configuration for a federation peer.
@@ -38,11 +49,12 @@ type CallHandler interface {
 }
 
 // FreeTetra GSSI Schema:
-//   1-9:    Local — only this cell, never forwarded between servers
-//   10-90:  FreeTetra global — shared between all FreeTetra servers
-//   91+:    BrandMeister-compatible — shared between FreeTetra servers AND
-//           bridged to DMR/BrandMeister on servers where dmrbridge is configured.
-//           TG numbers map 1:1 (e.g. TG 262 = DL, TG 2621 = DL Cluster Nord).
+//
+//	1-9:    Local — only this cell, never forwarded between servers
+//	10-90:  FreeTetra global — shared between all FreeTetra servers
+//	91+:    BrandMeister-compatible — shared between FreeTetra servers AND
+//	        bridged to DMR/BrandMeister on servers where dmrbridge is configured.
+//	        TG numbers map 1:1 (e.g. TG 262 = DL, TG 2621 = DL Cluster Nord).
 const (
 	federationGSSIMin uint32 = 10
 )
@@ -56,8 +68,11 @@ func isFederatedGSSI(gssi uint32) bool {
 
 // Hub manages all federation peer connections.
 type Hub struct {
+	federationv2pb.UnimplementedFederationTransportV2Server
+
 	serverName string
 	peerKey    string // shared key for incoming peer auth
+	rpcListen  string
 	handler    CallHandler
 	logger     *log.Logger
 
@@ -78,8 +93,6 @@ type Hub struct {
 	// Mesh routing: deduplication and TTL
 	mesh *MeshRouter
 
-	upgrader websocket.Upgrader
-
 	ctx context.Context
 
 	// UDP-Voice-Plane (optional, nil wenn disabled). Voice-Frames laufen
@@ -91,27 +104,42 @@ type Hub struct {
 	// Peer geschickt. Empfang validiert ueber UDPVoice.byToken.
 	udpInTokenMu sync.RWMutex
 	udpInTokens  map[string]string // peerName -> hex token (was wir von ihm erwarten)
+
+	serveStandaloneRPC bool
 }
 
 // NewHub creates a new federation hub.
-func NewHub(serverName, peerKey, selfURL string, handler CallHandler, logger *log.Logger) *Hub {
-	return &Hub{
-		serverName:  serverName,
-		peerKey:     peerKey,
-		selfURL:     selfURL,
-		handler:     handler,
-		logger:      logger,
-		peers:       make(map[string]*Peer),
-		activeCalls: make(map[string]map[string]bool),
-		knownPeers:  make(map[string]string),
-		udpInTokens: make(map[string]string),
-		mesh:        newMeshRouter(serverName),
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  4096,
-			WriteBufferSize: 4096,
-			CheckOrigin:     func(r *http.Request) bool { return true },
-		},
+func NewHub(serverName, peerKey, selfURL, rpcListen string, handler CallHandler, logger *log.Logger) *Hub {
+	if rpcListen == "" {
+		rpcListen = ":8092"
 	}
+	return &Hub{
+		serverName:         serverName,
+		peerKey:            peerKey,
+		selfURL:            selfURL,
+		rpcListen:          rpcListen,
+		handler:            handler,
+		logger:             logger,
+		peers:              make(map[string]*Peer),
+		activeCalls:        make(map[string]map[string]bool),
+		knownPeers:         make(map[string]string),
+		udpInTokens:        make(map[string]string),
+		mesh:               newMeshRouter(serverName),
+		serveStandaloneRPC: true,
+	}
+}
+
+// UseSharedPortRPC disables the dedicated RPC listener. Incoming federation
+// gRPC traffic must then be served via NewGRPCServer on the HTTP listener.
+func (h *Hub) UseSharedPortRPC() {
+	h.serveStandaloneRPC = false
+}
+
+// NewGRPCServer returns a gRPC server with the federation service registered.
+func (h *Hub) NewGRPCServer() *grpc.Server {
+	server := grpc.NewServer()
+	federationv2pb.RegisterFederationTransportV2Server(server, h)
+	return server
 }
 
 // EnableUDPVoice initialisiert die UDP-Voice-Plane. udpPort=0 = disabled.
@@ -133,6 +161,9 @@ func (h *Hub) EnableUDPVoice(udpPort int, advertised string) error {
 // Start connects to all configured peers and begins the federation loop.
 func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
 	h.ctx = ctx
+	if h.serveStandaloneRPC {
+		go h.serveRPC(ctx)
+	}
 
 	// Add configured peers to known list
 	for _, pc := range peerConfigs {
@@ -143,39 +174,25 @@ func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
 	}
 }
 
-// HandleIncoming handles an incoming HTTP request for peer connections (/peer/).
-func (h *Hub) HandleIncoming(w http.ResponseWriter, r *http.Request) {
-	peerName := r.Header.Get("X-Brew-Peer")
-	peerKey := r.Header.Get("X-Brew-Key")
-
-	if peerName == "" || peerKey == "" {
-		http.Error(w, "missing peer credentials", http.StatusForbidden)
-		return
-	}
-	if peerKey != h.peerKey {
-		h.logger.Printf("federation: rejected incoming peer %s (invalid key)", peerName)
-		http.Error(w, "invalid peer key", http.StatusForbidden)
-		return
-	}
-
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+func (h *Hub) serveRPC(ctx context.Context) {
+	lis, err := net.Listen("tcp", h.rpcListen)
 	if err != nil {
-		h.logger.Printf("federation: upgrade failed for %s: %v", peerName, err)
+		h.logger.Printf("federation: RPC listen failed on %s: %v", h.rpcListen, err)
 		return
 	}
+	server := grpc.NewServer()
+	federationv2pb.RegisterFederationTransportV2Server(server, h)
+	h.logger.Printf("federation: protobuf RPC listening on %s", h.rpcListen)
 
-	peer := newPeer(peerName, "incoming", conn, h.logger)
-	h.registerPeer(peer)
-	h.logger.Printf("federation: accepted incoming peer %s", peerName)
+	go func() {
+		<-ctx.Done()
+		server.GracefulStop()
+		_ = lis.Close()
+	}()
 
-	// Send hello (mit UDP-Voice-Handshake falls UDP aktiviert)
-	peer.SendJSON(h.buildHello(peerName))
-
-	// Send full sync
-	h.sendFullSync(peer)
-
-	go peer.writeLoop()
-	h.readLoop(peer)
+	if err := server.Serve(lis); err != nil && ctx.Err() == nil {
+		h.logger.Printf("federation: RPC server stopped: %v", err)
+	}
 }
 
 // buildHello konstruiert eine Hello-Message. Wenn UDP-Voice aktiv ist,
@@ -191,6 +208,10 @@ func (h *Hub) buildHello(peerName string) *Message {
 		Type:    MsgHello,
 		Origin:  h.serverName,
 		Version: ProtocolVersion,
+		Capabilities: []string{
+			CapabilityGRPCEnvelopeV1,
+			CapabilityTypedProtoV2Draft,
+		},
 	}
 	if h.udpVoice != nil && h.udpVoice.Advertised() != "" {
 		h.udpInTokenMu.Lock()
@@ -216,12 +237,16 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		}
 
 		h.logger.Printf("federation: connecting to peer %s at %s", pc.Name, pc.URL)
+		target, err := normalizeRPCTarget(pc.URL)
+		if err != nil {
+			h.logger.Printf("federation: invalid peer target %s: %v", pc.URL, err)
+			return
+		}
 
-		header := http.Header{}
-		header.Set("X-Brew-Peer", h.serverName)
-		header.Set("X-Brew-Key", pc.Key)
-
-		conn, _, err := websocket.DefaultDialer.Dial(pc.URL, header)
+		conn, err := grpc.NewClient(
+			target,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
 		if err != nil {
 			h.logger.Printf("federation: failed to connect to %s: %v", pc.Name, err)
 			select {
@@ -232,7 +257,30 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 			}
 		}
 
-		peer := newPeer(pc.Name, "outgoing", conn, h.logger)
+		callCtx, cancel := context.WithCancel(ctx)
+		md := metadata.New(map[string]string{
+			"x-brew-peer":           h.serverName,
+			"x-brew-key":            pc.Key,
+			federationSubpathHeader: federationSubpathForKey(pc.Key),
+		})
+		stream, err := federationv2pb.NewFederationTransportV2Client(conn).Connect(metadata.NewOutgoingContext(callCtx, md))
+		if err != nil {
+			cancel()
+			_ = conn.Close()
+			h.logger.Printf("federation: failed to open stream to %s: %v", pc.Name, err)
+			if isIncompatibleGRPCEndpoint(err) {
+				h.logger.Printf("federation: peer %s is not a compatible gRPC endpoint, stopping reconnect loop", pc.Name)
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+				continue
+			}
+		}
+
+		peer := newPeer(pc.Name, "outgoing", stream, cancel, h.logger)
 		h.registerPeer(peer)
 		h.logger.Printf("federation: connected to %s", pc.Name)
 
@@ -241,6 +289,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 
 		go peer.writeLoop()
 		h.readLoop(peer)
+		_ = conn.Close()
 
 		// Cleanup and reconnect
 		h.unregisterPeer(peer)
@@ -261,9 +310,9 @@ func (h *Hub) readLoop(peer *Peer) {
 	}()
 
 	for {
-		msgType, data, err := peer.conn.ReadMessage()
+		frame, err := peer.stream.Recv()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			if err != io.EOF {
 				h.logger.Printf("federation: %s read error: %v", peer.Name, err)
 			} else {
 				h.logger.Printf("federation: %s disconnected", peer.Name)
@@ -271,13 +320,102 @@ func (h *Hub) readLoop(peer *Peer) {
 			return
 		}
 
-		switch msgType {
-		case websocket.TextMessage:
-			h.handleJSONMessage(peer, data)
-		case websocket.BinaryMessage:
-			h.handleBinaryMessage(peer, data)
+		if ctrl := frame.GetControl(); ctrl != nil {
+			h.handleControlMessage(peer, ctrl)
+			continue
+		}
+		if vf := frame.GetVoiceFrame(); vf != nil {
+			h.handleVoiceFrame(peer, vf.GetCallUuid(), vf.GetFrameData())
 		}
 	}
+}
+
+// Connect handles an incoming protobuf RPC stream from another federation peer.
+func (h *Hub) Connect(stream grpc.BidiStreamingServer[federationv2pb.StreamFrame, federationv2pb.StreamFrame]) error {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		return fmt.Errorf("missing metadata")
+	}
+	peerName := firstMD(md, "x-brew-peer")
+	peerKey := firstMD(md, "x-brew-key")
+	peerSubpath := firstMD(md, federationSubpathHeader)
+	if peerName == "" || peerKey == "" {
+		return fmt.Errorf("missing peer credentials")
+	}
+	if peerKey != h.peerKey {
+		h.logger.Printf("federation: rejected incoming peer %s (invalid key)", peerName)
+		return fmt.Errorf("invalid peer key")
+	}
+	expectedSubpath := federationSubpathForKey(h.peerKey)
+	if peerSubpath == "" || peerSubpath != expectedSubpath {
+		h.logger.Printf("federation: rejected incoming peer %s (invalid federation subpath)", peerName)
+		return fmt.Errorf("invalid federation subpath")
+	}
+
+	peer := newPeer(peerName, "incoming", stream, nil, h.logger)
+	h.registerPeer(peer)
+	h.logger.Printf("federation: accepted incoming peer %s", peerName)
+
+	peer.SendJSON(h.buildHello(peerName))
+	h.sendFullSync(peer)
+
+	go peer.writeLoop()
+	h.readLoop(peer)
+	return nil
+}
+
+func (h *Hub) handleControlMessage(peer *Peer, ctrl *federationv2pb.Control) {
+	msg := controlToMessage(ctrl)
+	if msg == nil {
+		return
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Printf("federation: invalid control payload from %s: %v", peer.Name, err)
+		return
+	}
+	h.handleJSONMessage(peer, b)
+}
+
+func firstMD(md metadata.MD, key string) string {
+	vals := md.Get(key)
+	if len(vals) == 0 {
+		return ""
+	}
+	return vals[0]
+}
+
+func normalizeRPCTarget(raw string) (string, error) {
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return "", err
+		}
+		if u.Host == "" {
+			return "", fmt.Errorf("empty host")
+		}
+		return u.Host, nil
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "", fmt.Errorf("empty target")
+	}
+	return raw, nil
+}
+
+func isIncompatibleGRPCEndpoint(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "failed reading server preface") ||
+		strings.Contains(s, "frame too large") ||
+		strings.Contains(s, "http/1.1")
+}
+
+func federationSubpathForKey(key string) string {
+	normalized := strings.TrimSpace(key)
+	sum := sha256.Sum256([]byte(normalized))
+	return "/federation/" + hex.EncodeToString(sum[:12])
 }
 
 // handleJSONMessage processes a JSON federation message.
@@ -305,6 +443,7 @@ func (h *Hub) handleJSONMessage(peer *Peer, data []byte) {
 	switch msg.Type {
 	case MsgHello:
 		h.logger.Printf("federation: hello from %s (version %d)", msg.Origin, msg.Version)
+		peer.SetCapabilities(msg.Capabilities)
 		// Bootstrap peers are named from config (e.g. "peer-0"); after Hello
 		// the remote's real name becomes known. Rename + re-register so the
 		// gossip-based dedup (by name) doesn't create a duplicate connection
@@ -485,8 +624,13 @@ func (h *Hub) handleBinaryMessage(peer *Peer, data []byte) {
 		return
 	}
 
-	callUUID := string(data[:36])
-	frameData := data[36:]
+	h.handleVoiceFrame(peer, string(data[:36]), data[36:])
+}
+
+func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
+	if len(callUUID) != 36 {
+		return
+	}
 
 	// Forward to local Brew service
 	if h.handler != nil {
@@ -498,7 +642,7 @@ func (h *Hub) handleBinaryMessage(peer *Peer, data []byte) {
 	h.mu.RLock()
 	for _, p := range h.peers {
 		if p.Name != peer.Name {
-			p.SendBinary(data)
+			p.SendVoiceFrame(callUUID, frameData)
 		}
 	}
 	h.mu.RUnlock()
@@ -632,9 +776,7 @@ func (h *Hub) BroadcastVoiceFrame(callUUID string, frameData []byte) {
 		if h.udpVoice != nil && h.udpVoice.SendVoice(peer.Name, callUUID, frameData) {
 			continue
 		}
-		// Fallback: binary WS (TCP).
-		data := append([]byte(callUUID), frameData...)
-		peer.SendBinary(data)
+		peer.SendVoiceFrame(callUUID, frameData)
 	}
 }
 
@@ -788,6 +930,12 @@ func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
 	// Self-Check: niemals zu sich selbst connecten (sonst Geister-Peer
 	// "HH-Cluster incoming" auf eigenem Server).
 	if name == h.serverName || url == h.selfURL {
+		return false
+	}
+	// Legacy websocket gossip URLs (e.g. .../peer/) are not valid for
+	// protobuf gRPC federation transport.
+	if strings.Contains(strings.ToLower(url), "/peer") {
+		h.logger.Printf("federation: skipping discovered non-gRPC peer %s at %s", name, url)
 		return false
 	}
 
