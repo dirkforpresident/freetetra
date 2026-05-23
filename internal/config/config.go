@@ -14,12 +14,12 @@ type Config struct {
 	UserAgent      string
 	ReconnectDelay time.Duration
 
-	Server   ServerConfig
-	Client   BrewClientConfig
-	MQTT     MQTTConfig
-	Netstack NetstackConfig
-	WebRadio WebRadioConfig
-	Zello    ZelloConfig
+	Server     ServerConfig
+	Client     BrewClientConfig
+	MQTT       MQTTConfig
+	Netstack   NetstackConfig
+	WebRadio   WebRadioConfig
+	Zello      ZelloConfig
 	Echo       EchoConfig
 	RadioID    RadioIDConfig
 	APRS       APRSConfig
@@ -82,16 +82,12 @@ type APRSConfig struct {
 }
 
 type FederationConfig struct {
-	Enabled bool
-	Name    string   // This server's name (shown to peers)
-	Key     string   // Shared key for peer authentication
-	Peers   []string // Peer URLs (wss://...)
-	SelfURL string   // Our own URL for advertising to peers (gossip)
-
-	// UDP-Voice-Plane: Voice-Frames werden ueber UDP statt WS-TCP
-	// uebertragen — vermeidet TCP-head-of-line-blocking + Audio-Schleppe.
-	UDPPort    int    // local UDP listen port (0 = disabled)
-	UDPAdvAddr string // public UDP address "host:port" advertised to peers
+	Enabled       bool
+	Name          string   // This server's name (shown to peers)
+	Key           string   // Shared key for peer authentication
+	Peers         []string // Peer RPC targets (host:port or URL with host:port)
+	SelfURL       string   // Our own URL for advertising to peers (gossip)
+	RPCListenAddr string   // Local protobuf RPC bind address (e.g. :8092)
 }
 
 type ServerConfig struct {
@@ -338,13 +334,12 @@ func LoadFromEnv() (Config, error) {
 			InboundDefaultISSI: uint32(envInt("SIP_INBOUND_DEFAULT_ISSI", 0)),
 		},
 		Federation: FederationConfig{
-			Enabled:    envBool("FEDERATION_ENABLED", false),
-			Name:       env("FEDERATION_NAME", ""),
-			Key:        env("FEDERATION_KEY", ""),
-			Peers:      envCSV("FEDERATION_PEERS"),
-			SelfURL:    env("FEDERATION_SELF_URL", ""),
-			UDPPort:    envInt("FEDERATION_UDP_PORT", 0),
-			UDPAdvAddr: env("FEDERATION_UDP_ADV_ADDR", ""),
+			Enabled:       envBool("FEDERATION_ENABLED", false),
+			Name:          env("FEDERATION_NAME", ""),
+			Key:           env("FEDERATION_KEY", ""),
+			Peers:         envCSV("FEDERATION_PEERS"),
+			SelfURL:       env("FEDERATION_SELF_URL", ""),
+			RPCListenAddr: env("FEDERATION_RPC_LISTEN_ADDR", ":8092"),
 		},
 		Operator: OperatorConfig{
 			Name:        env("OPERATOR_NAME", ""),

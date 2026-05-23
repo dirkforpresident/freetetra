@@ -21,3 +21,4 @@ announce_*.bin
 .idea/
 .vscode/
 *.swp
+.tools/

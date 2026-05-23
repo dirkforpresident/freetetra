@@ -3,22 +3,27 @@ services:
     build: .
     container_name: freetetra
     env_file:
-      - .env
+      - ${ENV_COMMON_FILE:-.env}
+      - ${ENV_FREETETRA_FILE:-.env}
     ports:
-      - "8080:8080"
+      - "8101:8091"
+      - "8102:8102"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
 
   webradio:
-    build: .
+    build: .  
     container_name: freetetra-webradio
     entrypoint: ["/app/tetra-brew-webradio"]
     env_file:
-      - .env
+      - ${ENV_COMMON_FILE:-.env}
+      - ${ENV_WEBRADIO_FILE:-.env}
     environment:
       BREW_MODE: webradio
-      BREW_CLIENT_BASE_URL: http://freetetra:8080
+      BREW_CLIENT_BASE_URL: http://freetetra:8091
+      BREW_CLIENT_USERNAME: "2635717"
+      BREW_CLIENT_PASSWORD: "blafablafa"
       WEBRADIO_ENABLED: "true"
       WEBRADIO_STREAM_URL: "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3"
       WEBRADIO_TALKGROUP: "887"
@@ -33,10 +38,13 @@ services:
     container_name: freetetra-echo
     entrypoint: ["/app/tetra-brew-echo"]
     env_file:
-      - .env
+      - ${ENV_COMMON_FILE:-.env}
+      - ${ENV_ECHO_FILE:-.env}
     environment:
       BREW_MODE: echo
-      BREW_CLIENT_BASE_URL: http://freetetra:8080
+      BREW_CLIENT_BASE_URL: http://freetetra:8091
+      BREW_CLIENT_USERNAME: "2635720"
+      BREW_CLIENT_PASSWORD: "blafablafa"
       ECHO_TALKGROUP: "10002"
       ECHO_SOURCE_ISSI: "899002"
       ECHO_PLAYBACK_DELAY: "300ms"
