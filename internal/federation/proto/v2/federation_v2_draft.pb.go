@@ -682,12 +682,14 @@ func (x *AffiliateUpdate) GetGssis() []uint32 {
 }
 
 type CallStart struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Uuid          string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	SourceIssi    uint32                 `protobuf:"varint,2,opt,name=source_issi,json=sourceIssi,proto3" json:"source_issi,omitempty"`
-	DestGssi      uint32                 `protobuf:"varint,3,opt,name=dest_gssi,json=destGssi,proto3" json:"dest_gssi,omitempty"`
-	Priority      uint32                 `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
-	Service       uint32                 `protobuf:"varint,5,opt,name=service,proto3" json:"service,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Uuid       string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SourceIssi uint32                 `protobuf:"varint,2,opt,name=source_issi,json=sourceIssi,proto3" json:"source_issi,omitempty"`
+	DestGssi   uint32                 `protobuf:"varint,3,opt,name=dest_gssi,json=destGssi,proto3" json:"dest_gssi,omitempty"`
+	Priority   uint32                 `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
+	Service    uint32                 `protobuf:"varint,5,opt,name=service,proto3" json:"service,omitempty"`
+	// 0 = group call (use dest_gssi); nonzero = private call to this ISSI
+	DestIssi      uint32 `protobuf:"varint,6,opt,name=dest_issi,json=destIssi,proto3" json:"dest_issi,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -753,6 +755,13 @@ func (x *CallStart) GetPriority() uint32 {
 func (x *CallStart) GetService() uint32 {
 	if x != nil {
 		return x.Service
+	}
+	return 0
+}
+
+func (x *CallStart) GetDestIssi() uint32 {
+	if x != nil {
+		return x.DestIssi
 	}
 	return 0
 }
@@ -1411,14 +1420,15 @@ const file_internal_federation_proto_v2_federation_v2_draft_proto_rawDesc = "" +
 	"\x06Action\x12\x16\n" +
 	"\x12ACTION_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10ACTION_AFFILIATE\x10\x01\x12\x16\n" +
-	"\x12ACTION_DEAFFILIATE\x10\x02\"\x93\x01\n" +
+	"\x12ACTION_DEAFFILIATE\x10\x02\"\xb0\x01\n" +
 	"\tCallStart\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x1f\n" +
 	"\vsource_issi\x18\x02 \x01(\rR\n" +
 	"sourceIssi\x12\x1b\n" +
 	"\tdest_gssi\x18\x03 \x01(\rR\bdestGssi\x12\x1a\n" +
 	"\bpriority\x18\x04 \x01(\rR\bpriority\x12\x18\n" +
-	"\aservice\x18\x05 \x01(\rR\aservice\"3\n" +
+	"\aservice\x18\x05 \x01(\rR\aservice\x12\x1b\n" +
+	"\tdest_issi\x18\x06 \x01(\rR\bdestIssi\"3\n" +
 	"\aCallEnd\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x14\n" +
 	"\x05cause\x18\x02 \x01(\rR\x05cause\"H\n" +

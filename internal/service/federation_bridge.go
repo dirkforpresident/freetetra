@@ -180,12 +180,47 @@ func (fb *federationBridge) OnPeerCallStart(peerName string, callUUID string, so
 		ID:              uid,
 		SourceISSI:      sourceISSI,
 		DestinationGSI:  destGSSI,
-		DestinationType: "group",
+		DestinationType: destinationTypeGroup,
 		OriginClientID:  "federation:" + peerName,
 	}
 	fb.svc.callMu.Unlock()
 	if fb.svc.lastHeard != nil {
 		fb.svc.lastHeard.Start(uid, sourceISSI, destGSSI, "peer:"+peerName)
+	}
+}
+
+// OnPeerPrivateCallStart receives a federated subscriber-to-subscriber call
+// setup and delivers it to the local destination subscriber. The activeCall
+// record uses DestinationGSI to hold the destination ISSI (matching the
+// overload at service.go ~line 500 where DestinationType == subscriber
+// implies DestinationGSI carries the dest ISSI).
+func (fb *federationBridge) OnPeerPrivateCallStart(peerName string, callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16) {
+	uid, err := uuid.Parse(callUUID)
+	if err != nil {
+		fb.logger.Printf("federation: invalid private-call UUID from %s: %s", peerName, callUUID)
+		return
+	}
+
+	wire := brew.BuildSetupRequest(uid, brew.CircularCallPayload{
+		Source:      sourceISSI,
+		Destination: destISSI,
+		Priority:    priority,
+		Service:     uint8(service),
+	})
+	n := fb.svc.server.BroadcastToSubscriber(destISSI, wire, "")
+	fb.logger.Printf("federation: relayed private SETUP from %s ISSI=%d->ISSI=%d to %d local clients", peerName, sourceISSI, destISSI, n)
+
+	fb.svc.callMu.Lock()
+	fb.svc.calls[uid] = &activeCall{
+		ID:              uid,
+		SourceISSI:      sourceISSI,
+		DestinationGSI:  destISSI,
+		DestinationType: destinationTypeSubscriber,
+		OriginClientID:  "federation:" + peerName,
+	}
+	fb.svc.callMu.Unlock()
+	if fb.svc.lastHeard != nil {
+		fb.svc.lastHeard.Start(uid, sourceISSI, destISSI, "peer:"+peerName)
 	}
 }
 
@@ -204,8 +239,17 @@ func (fb *federationBridge) OnPeerCallEnd(peerName string, callUUID string, caus
 	}
 
 	wire := brew.BuildCallRelease(uid, cause)
-	n := fb.svc.server.BroadcastToGroup(call.DestinationGSI, wire, "")
-	fb.logger.Printf("federation: relayed GROUP_IDLE from %s GSSI=%d to %d local clients", peerName, call.DestinationGSI, n)
+	var n int
+	if call.DestinationType == destinationTypeSubscriber {
+		n = fb.svc.server.BroadcastToSubscriber(call.DestinationGSI, wire, "")
+		if call.SourceISSI != 0 && call.SourceISSI != call.DestinationGSI {
+			n += fb.svc.server.BroadcastToSubscriber(call.SourceISSI, wire, "")
+		}
+		fb.logger.Printf("federation: relayed private RELEASE from %s ISSI=%d to %d local clients", peerName, call.DestinationGSI, n)
+	} else {
+		n = fb.svc.server.BroadcastToGroup(call.DestinationGSI, wire, "")
+		fb.logger.Printf("federation: relayed GROUP_IDLE from %s GSSI=%d to %d local clients", peerName, call.DestinationGSI, n)
+	}
 
 	fb.svc.callMu.Lock()
 	delete(fb.svc.calls, uid)
@@ -232,6 +276,17 @@ func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, f
 	// Reconstruct Brew FRAME_TRAFFIC and broadcast
 	lengthBits := uint16(len(frameData) * 8)
 	wire := brew.BuildFrame(brew.FrameTypeTrafficChannel, uid, lengthBits, frameData)
+	if call.DestinationType == destinationTypeSubscriber {
+		// Mirror the local subscriber-call voice path (service.go ~line 500):
+		// deliver to the dest ISSI and to the source ISSI (the latter may
+		// not be local on this server — BroadcastToSubscriber is a no-op
+		// if no client owns that ISSI).
+		fb.svc.server.BroadcastToSubscriber(call.DestinationGSI, wire, "")
+		if call.SourceISSI != 0 && call.SourceISSI != call.DestinationGSI {
+			fb.svc.server.BroadcastToSubscriber(call.SourceISSI, wire, "")
+		}
+		return
+	}
 	fb.svc.server.BroadcastToGroup(call.DestinationGSI, wire, "")
 }
 
@@ -367,20 +422,36 @@ func (fb *federationBridge) NotifyCallStart(callUUID string, sourceISSI, destGSS
 	fb.hub.BroadcastCallStart(callUUID, sourceISSI, destGSSI, priority, service)
 }
 
-// NotifyCallEnd notifies peers about a local call ending.
+// NotifyPrivateCallStart routes a subscriber-to-subscriber CallStart to the
+// single peer that owns destISSI. If no peer owns the ISSI the call is
+// purely local — federation does nothing.
+func (fb *federationBridge) NotifyPrivateCallStart(callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16) {
+	if fb.hub == nil {
+		return
+	}
+	peerName, ok := fb.hub.RouteCallStartToPeerForISSI(callUUID, sourceISSI, destISSI, priority, service)
+	if !ok {
+		return
+	}
+	fb.logger.Printf("federation: routed private call=%s %d->%d via peer %s", callUUID, sourceISSI, destISSI, peerName)
+}
+
+// NotifyCallEnd notifies peers about a local call ending. Private calls go
+// to the single peer recorded for the call; group calls broadcast.
 func (fb *federationBridge) NotifyCallEnd(callUUID string, cause uint8) {
 	if fb.hub == nil {
 		return
 	}
-	fb.hub.BroadcastCallEnd(callUUID, cause)
+	fb.hub.RouteCallEndForCall(callUUID, cause)
 }
 
-// NotifyVoiceFrame sends a voice frame to peers involved in a call.
+// NotifyVoiceFrame sends a voice frame to peers involved in a call. Private
+// calls go to the single peer recorded for the call; group calls broadcast.
 func (fb *federationBridge) NotifyVoiceFrame(callUUID string, frameData []byte) {
 	if fb.hub == nil {
 		return
 	}
-	fb.hub.BroadcastVoiceFrame(callUUID, frameData)
+	fb.hub.RouteVoiceFrameForCall(callUUID, frameData)
 }
 
 // PeerCount returns the number of connected federation peers.
