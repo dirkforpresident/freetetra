@@ -729,7 +729,9 @@ func (h *Hub) handleSyncResponse(peer *Peer, sr *federationv2pb.SyncResponse) {
 	for issiStr, info := range sr.GetSubscribers() {
 		var issi uint32
 		fmt.Sscanf(issiStr, "%d", &issi)
-		peer.RegisterISSI(issi)
+		// sendFullSync only ships the sender's local subscribers, so for
+		// sync-path ISSIs the peer is itself the origin.
+		peer.RegisterISSI(issi, peer.Name)
 		peer.AffiliateISSI(issi, info.GetGssis())
 	}
 	h.logger.Printf("federation: synced %d subscribers from %s", len(sr.GetSubscribers()), peer.Name)
@@ -769,10 +771,10 @@ func (h *Hub) handlePeerExchange(peer *Peer, px *federationv2pb.PeerExchange) {
 func (h *Hub) handleSubscriberUpdate(peer *Peer, ctrl *federationv2pb.Control, up *federationv2pb.SubscriberUpdate) {
 	switch up.GetAction() {
 	case federationv2pb.SubscriberUpdate_ACTION_REGISTER:
-		peer.RegisterISSI(up.GetIssi())
+		peer.RegisterISSI(up.GetIssi(), ctrl.GetOrigin())
 		peer.AffiliateISSI(up.GetIssi(), up.GetGssis())
-		h.logger.Printf("federation: %s registered ISSI %d (GSSIs=%v) [ttl=%d path=%v]",
-			peer.Name, up.GetIssi(), up.GetGssis(), ctrl.GetTtl(), ctrl.GetPath())
+		h.logger.Printf("federation: %s registered ISSI %d (GSSIs=%v origin=%s) [ttl=%d path=%v]",
+			peer.Name, up.GetIssi(), up.GetGssis(), ctrl.GetOrigin(), ctrl.GetTtl(), ctrl.GetPath())
 	case federationv2pb.SubscriberUpdate_ACTION_DEREGISTER:
 		peer.DeregisterISSI(up.GetIssi())
 		h.logger.Printf("federation: %s deregistered ISSI %d [ttl=%d]", peer.Name, up.GetIssi(), ctrl.GetTtl())
@@ -1162,10 +1164,16 @@ func (h *Hub) PeerSnapshots() []PeerSnapshot {
 	defer h.mu.RUnlock()
 	out := make([]PeerSnapshot, 0, len(h.peers))
 	for _, p := range h.peers {
+		origins := p.Origins()
+		originStr := make(map[string]string, len(origins))
+		for issi, o := range origins {
+			originStr[fmt.Sprintf("%d", issi)] = o
+		}
 		out = append(out, PeerSnapshot{
 			Name:      p.Name,
 			Direction: p.Direction,
 			ISSIs:     p.ISSIs(),
+			Origins:   originStr,
 			GSSIs:     p.GSSIs(),
 			Buffer:    p.BufferStats(),
 		})
@@ -1173,11 +1181,16 @@ func (h *Hub) PeerSnapshots() []PeerSnapshot {
 	return out
 }
 
-// PeerSnapshot is a read-only snapshot of a peer's state.
+// PeerSnapshot is a read-only snapshot of a peer's state. Origins maps an
+// ISSI (decimal string for direct JSON consumption) to the server where
+// the subscriber is physically attached — this is the multi-hop origin
+// from Control.origin, not necessarily Name. Lets the admin dashboard
+// distinguish "this peer relayed it" from "this peer owns it".
 type PeerSnapshot struct {
 	Name      string              `json:"name"`
 	Direction string              `json:"direction"`
 	ISSIs     []uint32            `json:"issis"`
+	Origins   map[string]string   `json:"origins"`
 	GSSIs     map[uint32][]uint32 `json:"gssis"`
 	Buffer    PeerBufferStats     `json:"buffer"`
 }
@@ -1345,7 +1358,7 @@ func (h *Hub) redeemPending(newPeer *Peer, key string) {
 // than merge.
 func adoptPeerState(dst, src *Peer) {
 	src.mu.RLock()
-	issis := make(map[uint32]bool, len(src.issis))
+	issis := make(map[uint32]string, len(src.issis))
 	for k, v := range src.issis {
 		issis[k] = v
 	}
@@ -1367,7 +1380,7 @@ func adoptPeerState(dst, src *Peer) {
 	// Empty src so a late-firing cleanup timer doesn't double-log the
 	// ISSI count we just transferred.
 	src.mu.Lock()
-	src.issis = make(map[uint32]bool)
+	src.issis = make(map[uint32]string)
 	src.gssiAffiliations = make(map[uint32]map[uint32]bool)
 	src.mu.Unlock()
 }

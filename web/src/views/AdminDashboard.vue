@@ -104,6 +104,11 @@ async function update() {
     // also dedupes the case where the same peer briefly has both an outgoing
     // and an incoming record during the handshake. Service ISSIs
     // (900000-999999) are filtered.
+    //
+    // For peer-sourced rows we label by *origin* server (the node where the
+    // subscriber is physically attached), not by the direct peer that fed
+    // it to us. The hub stores origin from Control.origin per ISSI; falling
+    // back to peer.name preserves the previous behaviour on old payloads.
     const subsByIssi = new Map<number, SubscriberRow>();
     for (const s of snapshot.subscribers ?? []) {
       if (isServiceIssi(s.issi)) continue;
@@ -117,7 +122,8 @@ async function update() {
         for (const [g, members] of Object.entries(p.gssis ?? {})) {
           if ((members ?? []).includes(issi)) gssis.push(parseInt(g, 10));
         }
-        subsByIssi.set(issi, { issi, source: p.name, gssis });
+        const origin = p.origins?.[String(issi)];
+        subsByIssi.set(issi, { issi, source: origin || p.name, gssis });
       }
     }
     subscriberRows.value = Array.from(subsByIssi.values()).sort((a, b) => a.issi - b.issi);
