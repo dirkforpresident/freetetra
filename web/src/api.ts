@@ -79,6 +79,11 @@ export interface Peer {
   name: string;
   direction: "incoming" | "outgoing";
   issis?: number[];
+  // ISSI (decimal string) -> originating server name. May differ from
+  // `name` when the peer is just relaying ISSIs it learned over a deeper
+  // federation hop. Empty/missing for legacy snapshots — callers should
+  // fall back to `name`.
+  origins?: Record<string, string>;
   gssis?: Record<string, number[]>;
   count?: number;
 }
