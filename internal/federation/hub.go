@@ -57,6 +57,7 @@ type PeerConfig struct {
 // to receive federation events.
 type CallHandler interface {
 	OnPeerCallStart(peerName string, callUUID string, sourceISSI, destGSSI uint32, priority uint8, service uint16)
+	OnPeerPrivateCallStart(peerName string, callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16)
 	OnPeerCallEnd(peerName string, callUUID string, cause uint8)
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
@@ -119,8 +120,9 @@ type Hub struct {
 	pendingPeers map[string]*pendingPeer
 
 	// Active calls routed to peers
-	callMu      sync.RWMutex
-	activeCalls map[string]map[string]bool // callUUID -> set of peer names
+	callMu       sync.RWMutex
+	activeCalls  map[string]map[string]bool // callUUID -> set of peer names (group / broadcast)
+	privateCalls map[string]string          // callUUID -> peer.Name (subscriber-to-subscriber, point-to-point)
 
 	// Gossip: known peer URLs (discovered via peer exchange)
 	knownMu    sync.RWMutex
@@ -152,6 +154,7 @@ func NewHub(serverName, peerKey, selfURL, rpcListen string, handler CallHandler,
 		peers:              make(map[string]*Peer),
 		pendingPeers:       make(map[string]*pendingPeer),
 		activeCalls:        make(map[string]map[string]bool),
+		privateCalls:       make(map[string]string),
 		knownPeers:         make(map[string]string),
 		mesh:               newMeshRouter(serverName),
 		serveStandaloneRPC: true,
@@ -790,6 +793,19 @@ func (h *Hub) handleAffiliateUpdate(peer *Peer, ctrl *federationv2pb.Control, up
 }
 
 func (h *Hub) handleCallStart(peer *Peer, ctrl *federationv2pb.Control, cs *federationv2pb.CallStart) {
+	// Private (subscriber-to-subscriber) calls are point-to-point: the
+	// destination peer plays voice out locally and does NOT relay further.
+	if cs.GetDestIssi() != 0 {
+		if h.handler != nil {
+			h.handler.OnPeerPrivateCallStart(peer.Name, cs.GetUuid(), cs.GetSourceIssi(),
+				cs.GetDestIssi(), uint8(cs.GetPriority()), uint16(cs.GetService()))
+		}
+		h.callMu.Lock()
+		h.privateCalls[cs.GetUuid()] = peer.Name
+		h.callMu.Unlock()
+		return
+	}
+
 	if h.handler != nil {
 		h.handler.OnPeerCallStart(peer.Name, cs.GetUuid(), cs.GetSourceIssi(),
 			cs.GetDestGssi(), uint8(cs.GetPriority()), uint16(cs.GetService()))
@@ -824,8 +840,15 @@ func (h *Hub) handleCallEnd(peer *Peer, ctrl *federationv2pb.Control, ce *federa
 		h.handler.OnPeerCallEnd(peer.Name, ce.GetUuid(), uint8(ce.GetCause()))
 	}
 	h.callMu.Lock()
+	_, wasPrivate := h.privateCalls[ce.GetUuid()]
+	delete(h.privateCalls, ce.GetUuid())
 	delete(h.activeCalls, ce.GetUuid())
 	h.callMu.Unlock()
+
+	// Private calls are point-to-point: the destination peer never relays.
+	if wasPrivate {
+		return
+	}
 
 	if !h.mesh.ShouldRelay(ctrl) {
 		return
@@ -1481,35 +1504,96 @@ func (h *Hub) relayToPeers(ctrl *federationv2pb.Control, excludeName string) {
 }
 
 // =============================================================================
-// TODO: private call routing stubs.
+// Private (subscriber-to-subscriber) call routing.
 //
-// federation_bridge.go (from feat/federation-duplex-proxy, now on master) calls
-// these three Route* methods. They were implemented on top of the JSON-Message
-// world in feat/federation-pr / feat/federation-duplex-proxy. This branch's
-// typed-protobuf refactor predates that work, so the methods need to be
-// reimplemented on top of the typed-protobuf core. See PR #5
-// (feat/federation-protobuf-fixes) for the rest of the federation-pr fixes
-// ported onto this branch.
-//
-// These stubs let the merged tree compile. They MUST be reimplemented before
-// federation is treated as production-ready — federation will otherwise
-// silently drop private calls.
+// Group calls broadcast to every peer; private calls go to exactly one peer
+// (the one that owns the destination ISSI). The privateCalls map records
+// the call->peer binding made at CallStart so the matching voice frames and
+// CallEnd take the same point-to-point path.
 
+// RouteCallStartToPeerForISSI sends a private-call CallStart to the single
+// peer that owns destISSI and records the routing in privateCalls so the
+// matching voice frames and CallEnd take the same one-to-one path. Returns
+// the peer name and true if the ISSI was found; ok=false leaves the caller
+// to handle "destination not federated" (no broadcast).
 func (h *Hub) RouteCallStartToPeerForISSI(callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16) (string, bool) {
-	_ = callUUID
-	_ = sourceISSI
-	_ = destISSI
-	_ = priority
-	_ = service
-	return "", false
+	peer := h.FindPeerForISSI(destISSI)
+	if peer == nil {
+		return "", false
+	}
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_CallStart{
+			CallStart: &federationv2pb.CallStart{
+				Uuid:       callUUID,
+				SourceIssi: sourceISSI,
+				DestIssi:   destISSI,
+				Priority:   uint32(priority),
+				Service:    uint32(service),
+			},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	_ = peer.SendControl(ctrl)
+	h.callMu.Lock()
+	h.privateCalls[callUUID] = peer.Name
+	h.callMu.Unlock()
+	return peer.Name, true
 }
 
-func (h *Hub) RouteCallEndForCall(callUUID string, cause uint8) {
-	_ = callUUID
-	_ = cause
-}
-
+// RouteVoiceFrameForCall forwards a voice frame to the single peer recorded
+// for a private call, or falls through to the all-peers broadcast used by
+// group calls when there is no per-call peer.
 func (h *Hub) RouteVoiceFrameForCall(callUUID string, frameData []byte) {
-	_ = callUUID
-	_ = frameData
+	h.callMu.RLock()
+	peerName, ok := h.privateCalls[callUUID]
+	h.callMu.RUnlock()
+	if !ok {
+		h.BroadcastVoiceFrame(callUUID, frameData)
+		return
+	}
+	h.mu.RLock()
+	peer := h.peers[peerName]
+	if peer == nil {
+		peer = h.peers[peerName+":in"]
+	}
+	h.mu.RUnlock()
+	if peer == nil {
+		return
+	}
+	_ = peer.SendVoiceFrame(callUUID, frameData)
+}
+
+// RouteCallEndForCall sends a CallEnd to the single peer recorded for a
+// private call (then forgets it), or falls through to the all-peers
+// broadcast used by group calls.
+func (h *Hub) RouteCallEndForCall(callUUID string, cause uint8) {
+	h.callMu.Lock()
+	peerName, ok := h.privateCalls[callUUID]
+	delete(h.privateCalls, callUUID)
+	h.callMu.Unlock()
+	if !ok {
+		h.BroadcastCallEnd(callUUID, cause)
+		return
+	}
+	h.mu.RLock()
+	peer := h.peers[peerName]
+	if peer == nil {
+		peer = h.peers[peerName+":in"]
+	}
+	h.mu.RUnlock()
+	if peer == nil {
+		return
+	}
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_CallEnd{
+			CallEnd: &federationv2pb.CallEnd{
+				Uuid:  callUUID,
+				Cause: uint32(cause),
+			},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	_ = peer.SendControl(ctrl)
 }
