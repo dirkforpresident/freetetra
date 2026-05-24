@@ -156,6 +156,13 @@ type WebRadioConfig struct {
 	EncoderFrameSize int
 	ReconnectDelay   time.Duration
 	ReleaseCause     uint8
+
+	// Pre-processing filter chain knobs. Composed into ffmpeg's -af value
+	// by BuildWebRadioFilterChain; left at the legacy defaults this
+	// reproduces the previous hardcoded "volume=-14dB,acompressor=..." chain.
+	VolumeDB     float64
+	Compressor   string
+	ExtraFilters string
 }
 
 type ZelloConfig struct {
@@ -272,6 +279,9 @@ func LoadFromEnv() (Config, error) {
 			EncoderFrameSize: envInt("WEBRADIO_ENCODER_FRAME_SIZE", 18),
 			ReconnectDelay:   envDuration("WEBRADIO_RECONNECT_DELAY", 3*time.Second),
 			ReleaseCause:     uint8(envInt("WEBRADIO_RELEASE_CAUSE", 0)),
+			VolumeDB:         envFloat("WEBRADIO_VOLUME_DB", -14),
+			Compressor:       env("WEBRADIO_COMPRESSOR", "acompressor=threshold=-20dB:ratio=4:attack=5:release=50"),
+			ExtraFilters:     env("WEBRADIO_EXTRA_FILTERS", ""),
 		},
 		Zello: ZelloConfig{
 			Enabled:          envBool("ZELLO_ENABLED", false),
@@ -443,6 +453,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
 	if err != nil {
 		return fallback
 	}
