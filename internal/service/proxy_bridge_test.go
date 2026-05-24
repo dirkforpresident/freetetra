@@ -202,6 +202,71 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	}
 }
 
+// TestProxyBridge_OutboundConnectForwardsToInbound exercises the state=8
+// (ConnectRequest) path — the actual "user picked up" event that arrives
+// from the target's BS. The proxy must fan ConnectRequest out on BOTH
+// the inbound and outbound legs so the caller's radio sees the answer
+// instead of timing out as "no answer".
+func TestProxyBridge_OutboundConnectForwardsToInbound(t *testing.T) {
+	b, plane := newTestProxy(t, 999, 1002, 10*time.Second, 60*time.Second, 4)
+
+	inboundCallID := uuid.New()
+	b.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateSetupRequest,
+		Identifier: inboundCallID,
+		Payload:    brew.CircularCallPayload{Source: 1001, Destination: 999, Duplex: 1},
+	})
+	setupReqs := plane.findKind("setup-req")
+	if len(setupReqs) != 1 {
+		t.Fatalf("expected one outbound SetupRequest, got %d", len(setupReqs))
+	}
+	outboundCallID := setupReqs[0].callID
+
+	// Reset the plane's event log so we count only the post-Connect events.
+	plane.mu.Lock()
+	plane.events = nil
+	plane.mu.Unlock()
+
+	// Target picks up -> BS forwards U-CONNECT as Brew ConnectRequest.
+	b.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateConnectRequest,
+		Identifier: outboundCallID,
+		Payload:    brew.EmptyPayload{},
+	})
+
+	connects := plane.findKind("connect-req")
+	if len(connects) != 2 {
+		t.Fatalf("expected 2 ConnectRequests (inbound + outbound), got %d: %#v", len(connects), connects)
+	}
+	gotInbound := false
+	gotOutbound := false
+	for _, c := range connects {
+		switch c.callID {
+		case inboundCallID:
+			gotInbound = true
+			if c.source != 999 || c.dest != 1001 {
+				t.Fatalf("inbound ConnectRequest src/dst should be bridge->caller (999->1001), got %d->%d", c.source, c.dest)
+			}
+			if c.duplex != 1 {
+				t.Fatalf("inbound ConnectRequest duplex flag not mirrored: got %d", c.duplex)
+			}
+		case outboundCallID:
+			gotOutbound = true
+			if c.source != 999 || c.dest != 1002 {
+				t.Fatalf("outbound ConnectRequest src/dst should be bridge->target (999->1002), got %d->%d", c.source, c.dest)
+			}
+		default:
+			t.Fatalf("unexpected ConnectRequest on unknown callID %s", c.callID)
+		}
+	}
+	if !gotInbound {
+		t.Fatalf("missing ConnectRequest on INBOUND leg — caller's radio will time out as no-answer")
+	}
+	if !gotOutbound {
+		t.Fatalf("missing ConnectRequest on OUTBOUND leg — target BS won't see the connect confirm")
+	}
+}
+
 func TestProxyBridge_OutboundReject(t *testing.T) {
 	b, plane := newTestProxy(t, 999, 1002, 10*time.Second, 60*time.Second, 4)
 
