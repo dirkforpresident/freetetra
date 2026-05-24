@@ -194,6 +194,7 @@ type WebRadioConfig struct {
 	Silencedetect    bool
 	SilenceNoiseDB   int           // -dB threshold for "silence"; default -50
 	SilenceMinDur    time.Duration // minimum run before silence_start fires; default 1.5s
+	SilenceGating    bool          // when true, drop frames + idle the call while silence holds
 
 	// ListenAddr enables a small HTTP server inside the webradio binary.
 	// Empty → no server (legacy behavior). When set, serves /api/webradio/status.
@@ -329,6 +330,7 @@ func LoadFromEnv() (Config, error) {
 			Silencedetect:    envBool("WEBRADIO_SILENCEDETECT", false),
 			SilenceNoiseDB:   envInt("WEBRADIO_SILENCE_NOISE_DB", -50),
 			SilenceMinDur:    envDuration("WEBRADIO_SILENCE_MIN_DUR", 1500*time.Millisecond),
+			SilenceGating:    envBool("WEBRADIO_SILENCE_GATING", false),
 			ListenAddr:       env("WEBRADIO_LISTEN_ADDR", ""),
 			TelemetryLogEvery: envDuration("WEBRADIO_TELEMETRY_LOG_EVERY", 30*time.Second),
 		},

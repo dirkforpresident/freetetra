@@ -307,6 +307,23 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 			continue
 		}
 
+		// Silence-aware gating: while the parser reports silence, release
+		// any active call and drop incoming frames. The next non-silent
+		// frame falls through to the "!callStarted" branch below and
+		// allocates a fresh callID, so receivers see a clean stop/start
+		// instead of dead air being held on the TG.
+		if b.cfg.WebRadio.SilenceGating && b.telemetry != nil && b.telemetry.IsSilent() {
+			if callStarted {
+				b.plane.IdleInjectedCall("webradio", currentCallID, b.cfg.WebRadio.ReleaseCause)
+				b.logger.Printf("webradio silence gate: idled call=%s", currentCallID.String())
+				callStarted = false
+				activeCallID = uuid.Nil
+				currentCallID = uuid.New()
+				frameInCall = 0
+			}
+			continue
+		}
+
 		if !callStarted {
 			if !b.plane.StartInjectedCall("webradio", currentCallID, b.cfg.WebRadio.SourceISSI, b.cfg.WebRadio.Talkgroup) {
 				continue
