@@ -60,3 +60,44 @@ func TestBuildWebRadioFilterChain_CompressorOptional(t *testing.T) {
 		t.Errorf("expected %q, got %q", want, got)
 	}
 }
+
+func TestBuildWebRadioFilterChain_SpeechBand(t *testing.T) {
+	cfg := config.WebRadioConfig{HPFHz: 120, LPFHz: 3500}
+	got := BuildWebRadioFilterChain(cfg)
+	want := "highpass=f=120,lowpass=f=3500"
+	if got != want {
+		t.Errorf("speech-band chain mismatch:\n got = %q\nwant = %q", got, want)
+	}
+}
+
+func TestBuildWebRadioFilterChain_ResamplerAppendedLast(t *testing.T) {
+	cfg := config.WebRadioConfig{
+		VolumeDB:     -14,
+		Compressor:   "acompressor=ratio=3",
+		HPFHz:        120,
+		ExtraFilters: "extra=1",
+		Resampler:    "soxr",
+	}
+	got := BuildWebRadioFilterChain(cfg)
+	want := "volume=-14dB,acompressor=ratio=3,highpass=f=120,extra=1,aresample=resampler=soxr"
+	if got != want {
+		t.Errorf("resampler position wrong:\n got = %q\nwant = %q", got, want)
+	}
+}
+
+func TestBuildWebRadioFilterChain_HPFLPFInsertedBetweenCompressorAndExtra(t *testing.T) {
+	// HPF/LPF must sit between dynamics and any user-supplied tail so that
+	// codec-bound band-limiting is the operator's last *implicit* step
+	// before whatever escape-hatch filter they tack on.
+	cfg := config.WebRadioConfig{
+		Compressor:   "acompressor=ratio=2",
+		HPFHz:        120,
+		LPFHz:        3500,
+		ExtraFilters: "atempo=1.0",
+	}
+	got := BuildWebRadioFilterChain(cfg)
+	want := "acompressor=ratio=2,highpass=f=120,lowpass=f=3500,atempo=1.0"
+	if got != want {
+		t.Errorf("order mismatch:\n got = %q\nwant = %q", got, want)
+	}
+}

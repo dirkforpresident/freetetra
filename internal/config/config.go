@@ -163,6 +163,17 @@ type WebRadioConfig struct {
 	VolumeDB     float64
 	Compressor   string
 	ExtraFilters string
+
+	// Speech-band shaping. HPF/LPF in Hz; 0 disables that stage.
+	// Recommended values for narrowband ACELP: HPF 120 (kill rumble),
+	// LPF 3500 (codec ceiling).
+	HPFHz int
+	LPFHz int
+
+	// Resampler picks ffmpeg's aresample backend ("" → default, "soxr" →
+	// higher-quality SoX-style downsampling). Applied at the end of the
+	// chain so it sees the final, processed signal.
+	Resampler string
 }
 
 type ZelloConfig struct {
@@ -282,6 +293,9 @@ func LoadFromEnv() (Config, error) {
 			VolumeDB:         envFloat("WEBRADIO_VOLUME_DB", -14),
 			Compressor:       env("WEBRADIO_COMPRESSOR", "acompressor=threshold=-20dB:ratio=4:attack=5:release=50"),
 			ExtraFilters:     env("WEBRADIO_EXTRA_FILTERS", ""),
+			HPFHz:            envInt("WEBRADIO_HPF_HZ", 0),
+			LPFHz:            envInt("WEBRADIO_LPF_HZ", 0),
+			Resampler:        env("WEBRADIO_RESAMPLER", ""),
 		},
 		Zello: ZelloConfig{
 			Enabled:          envBool("ZELLO_ENABLED", false),

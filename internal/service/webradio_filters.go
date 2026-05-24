@@ -32,6 +32,15 @@ func BuildWebRadioFilterChain(cfg config.WebRadioConfig) string {
 		fc.add(fmt.Sprintf("volume=%gdB", cfg.VolumeDB))
 	}
 	fc.add(cfg.Compressor)
+	if cfg.HPFHz > 0 {
+		fc.add(fmt.Sprintf("highpass=f=%d", cfg.HPFHz))
+	}
+	if cfg.LPFHz > 0 {
+		fc.add(fmt.Sprintf("lowpass=f=%d", cfg.LPFHz))
+	}
 	fc.add(cfg.ExtraFilters)
+	if r := strings.TrimSpace(cfg.Resampler); r != "" {
+		fc.add(fmt.Sprintf("aresample=resampler=%s", r))
+	}
 	return fc.String()
 }
