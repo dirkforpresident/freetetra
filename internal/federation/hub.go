@@ -36,14 +36,6 @@ const (
 	// with FailedPrecondition; the dialer treats this as a permanent
 	// error and stops reconnecting.
 	MinSupportedProtocolVersion = 2
-
-	// peerRedemptionWindow keeps a disconnected peer's ISSI/GSSI tables
-	// around so a fast reconnect can adopt them instead of waiting for a
-	// fresh sync round-trip. Short flaps (e.g. an upstream nginx reset)
-	// no longer cause federated routing for that peer's subscribers to
-	// drop out, and the "cleaned up peer X (N ISSIs removed)" log only
-	// fires when the peer really stays gone.
-	peerRedemptionWindow = 30 * time.Second
 )
 
 // PeerConfig is the configuration for a federation peer.
@@ -57,11 +49,10 @@ type PeerConfig struct {
 // to receive federation events.
 type CallHandler interface {
 	OnPeerCallStart(peerName string, callUUID string, sourceISSI, destGSSI uint32, priority uint8, service uint16)
-	OnPeerPrivateCallStart(peerName string, callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16)
 	OnPeerCallEnd(peerName string, callUUID string, cause uint8)
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
-	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, tmoSite string)
+	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string)
 	OnPeerStationUpdate(peerName string, station map[string]any)
 	GetLocalSubscribers() map[uint32][]uint32
 
@@ -89,16 +80,6 @@ func isFederatedGSSI(gssi uint32) bool {
 	return gssi >= federationGSSIMin
 }
 
-// pendingPeer is a disconnected peer being held in the redemption window —
-// its subscriber tables stay intact in case the same peer reconnects soon,
-// at which point registerPeer/renamePeer transfers the state to the new
-// peer object and cancels the timer. If the timer fires first, the peer is
-// fully cleaned up.
-type pendingPeer struct {
-	peer  *Peer
-	timer *time.Timer
-}
-
 // Hub manages all federation peer connections.
 type Hub struct {
 	federationv2pb.UnimplementedFederationTransportV2Server
@@ -112,17 +93,9 @@ type Hub struct {
 	mu    sync.RWMutex
 	peers map[string]*Peer // peer name -> Peer
 
-	// Peers whose stream just died but whose subscriber tables we're
-	// holding onto for peerRedemptionWindow in case the same peer
-	// reconnects. Keyed by the same direction-suffixed peerKey() as
-	// h.peers so a redemption matches the original slot exactly.
-	pendingMu    sync.Mutex
-	pendingPeers map[string]*pendingPeer
-
 	// Active calls routed to peers
-	callMu       sync.RWMutex
-	activeCalls  map[string]map[string]bool // callUUID -> set of peer names (group / broadcast)
-	privateCalls map[string]string          // callUUID -> peer.Name (subscriber-to-subscriber, point-to-point)
+	callMu      sync.RWMutex
+	activeCalls map[string]map[string]bool // callUUID -> set of peer names
 
 	// Gossip: known peer URLs (discovered via peer exchange)
 	knownMu    sync.RWMutex
@@ -152,9 +125,7 @@ func NewHub(serverName, peerKey, selfURL, rpcListen string, handler CallHandler,
 		handler:            handler,
 		logger:             logger,
 		peers:              make(map[string]*Peer),
-		pendingPeers:       make(map[string]*pendingPeer),
 		activeCalls:        make(map[string]map[string]bool),
-		privateCalls:       make(map[string]string),
 		knownPeers:         make(map[string]string),
 		mesh:               newMeshRouter(serverName),
 		serveStandaloneRPC: true,
@@ -169,24 +140,9 @@ func (h *Hub) UseSharedPortRPC() {
 
 // NewGRPCServer returns a gRPC server with the federation service registered.
 func (h *Hub) NewGRPCServer() *grpc.Server {
-	server := grpc.NewServer(federationServerOptions()...)
+	server := grpc.NewServer()
 	federationv2pb.RegisterFederationTransportV2Server(server, h)
 	return server
-}
-
-// federationServerOptions bumps the HTTP/2 initial windows from the gRPC
-// default 64 KB to 1 MB on each direction. Anti-entropy bursts ship dozens
-// of small control messages back-to-back at peer-connect time; the default
-// window fills before the peer's first WINDOW_UPDATE arrives, stalling
-// writeLoop and filling the 256-slot Go send channel within ~32 ms (the
-// "send buffer full" pattern we saw on every fresh handshake). 1 MB gives
-// roughly 2000 messages of headroom before backpressure shows.
-func federationServerOptions() []grpc.ServerOption {
-	const window = 1 << 20
-	return []grpc.ServerOption{
-		grpc.InitialWindowSize(window),
-		grpc.InitialConnWindowSize(window),
-	}
 }
 
 // Start connects to all configured peers and begins the federation loop.
@@ -195,8 +151,6 @@ func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
 	if h.serveStandaloneRPC {
 		go h.serveRPC(ctx)
 	}
-
-	go h.statsLoop(ctx)
 
 	// Add configured peers to known list
 	for _, pc := range peerConfigs {
@@ -207,55 +161,13 @@ func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
 	}
 }
 
-// statsLoop emits a one-line snapshot of every peer's send-buffer state
-// every 30s. The line is "<name>/<dir> q=L/C sent=cN/vM dropped=cD/vV"
-// where q is the Go-channel occupancy, sent/dropped are lifetime totals
-// for control vs voice frames. The window is the same as the anti-entropy
-// cadence, which is the main burst source — line up the two in the log to
-// see whether the burst was fully absorbed or whether some peer's queue
-// stayed high afterwards.
-func (h *Hub) statsLoop(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			h.logPeerStats()
-		}
-	}
-}
-
-func (h *Hub) logPeerStats() {
-	h.mu.RLock()
-	if len(h.peers) == 0 {
-		h.mu.RUnlock()
-		return
-	}
-	parts := make([]string, 0, len(h.peers))
-	for _, p := range h.peers {
-		bs := p.BufferStats()
-		dir := "out"
-		if p.Direction == "incoming" {
-			dir = "in"
-		}
-		parts = append(parts, fmt.Sprintf("%s/%s q=%d/%d sent=c%d/v%d dropped=c%d/v%d",
-			p.Name, dir, bs.QueueLen, bs.QueueCap,
-			bs.SentControl, bs.SentVoice,
-			bs.DroppedControl, bs.DroppedVoice))
-	}
-	h.mu.RUnlock()
-	h.logger.Printf("federation: peer stats: %s", strings.Join(parts, " | "))
-}
-
 func (h *Hub) serveRPC(ctx context.Context) {
 	lis, err := net.Listen("tcp", h.rpcListen)
 	if err != nil {
 		h.logger.Printf("federation: RPC listen failed on %s: %v", h.rpcListen, err)
 		return
 	}
-	server := grpc.NewServer(federationServerOptions()...)
+	server := grpc.NewServer()
 	federationv2pb.RegisterFederationTransportV2Server(server, h)
 	h.logger.Printf("federation: protobuf RPC listening on %s", h.rpcListen)
 
@@ -311,11 +223,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		} else {
 			creds = insecure.NewCredentials()
 		}
-		conn, err := grpc.NewClient(target,
-			grpc.WithTransportCredentials(creds),
-			grpc.WithInitialWindowSize(1<<20),
-			grpc.WithInitialConnWindowSize(1<<20),
-		)
+		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			h.logger.Printf("federation: failed to connect to %s: %v (retry in %s)", pc.Name, err, delay)
 			if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
@@ -353,7 +261,9 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		go peer.writeLoop()
 		h.readLoop(peer)
 		_ = conn.Close()
-		// readLoop's defer already ran unregisterPeer — don't double-cleanup.
+
+		// Cleanup and reconnect.
+		h.unregisterPeer(peer)
 
 		// If the peer was rejected for a permanent reason (e.g. version
 		// mismatch) there is no point retrying — config or code on one
@@ -393,53 +303,23 @@ func waitBackoff(ctx context.Context, delay *time.Duration, base, max time.Durat
 }
 
 // readLoop reads messages from a peer.
-//
-// Recv() runs in a separate goroutine so the main loop can also wake on
-// peer.done — that's what lets registerPeer's eviction of an old incoming
-// peer actually unblock readLoop. Without this, an incoming peer's stream
-// stays alive after Close() (cancel is nil for incoming peers) and keeps
-// feeding handler.OnPeerVoiceFrame / OnPeerCallStart for traffic that's
-// also flowing through its replacement — the audio-duplication bug.
 func (h *Hub) readLoop(peer *Peer) {
-	defer h.unregisterPeer(peer)
-
-	type recvResult struct {
-		frame *federationv2pb.StreamFrame
-		err   error
-	}
-	recvCh := make(chan recvResult, 1)
-	go func() {
-		for {
-			frame, err := peer.stream.Recv()
-			select {
-			case recvCh <- recvResult{frame: frame, err: err}:
-			case <-peer.done:
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
+	defer func() {
+		h.unregisterPeer(peer)
 	}()
 
 	for {
-		var r recvResult
-		select {
-		case r = <-recvCh:
-		case <-peer.done:
-			return
-		}
-
-		if r.err != nil {
-			if r.err != io.EOF {
-				h.logger.Printf("federation: %s read error: %v", peer.Name, r.err)
+		frame, err := peer.stream.Recv()
+		if err != nil {
+			if err != io.EOF {
+				h.logger.Printf("federation: %s read error: %v", peer.Name, err)
 			} else {
 				h.logger.Printf("federation: %s disconnected", peer.Name)
 			}
 			return
 		}
 
-		if ctrl := r.frame.GetControl(); ctrl != nil {
+		if ctrl := frame.GetControl(); ctrl != nil {
 			h.handleControlMessage(peer, ctrl)
 			// A handler (e.g. handleHello version-check) may have marked
 			// the peer for rejection. Exit the loop so Connect returns
@@ -450,7 +330,7 @@ func (h *Hub) readLoop(peer *Peer) {
 			}
 			continue
 		}
-		if vf := r.frame.GetVoiceFrame(); vf != nil {
+		if vf := frame.GetVoiceFrame(); vf != nil {
 			h.handleVoiceFrame(peer, vf.GetCallUuid(), vf.GetFrameData())
 		}
 	}
@@ -793,19 +673,6 @@ func (h *Hub) handleAffiliateUpdate(peer *Peer, ctrl *federationv2pb.Control, up
 }
 
 func (h *Hub) handleCallStart(peer *Peer, ctrl *federationv2pb.Control, cs *federationv2pb.CallStart) {
-	// Private (subscriber-to-subscriber) calls are point-to-point: the
-	// destination peer plays voice out locally and does NOT relay further.
-	if cs.GetDestIssi() != 0 {
-		if h.handler != nil {
-			h.handler.OnPeerPrivateCallStart(peer.Name, cs.GetUuid(), cs.GetSourceIssi(),
-				cs.GetDestIssi(), uint8(cs.GetPriority()), uint16(cs.GetService()))
-		}
-		h.callMu.Lock()
-		h.privateCalls[cs.GetUuid()] = peer.Name
-		h.callMu.Unlock()
-		return
-	}
-
 	if h.handler != nil {
 		h.handler.OnPeerCallStart(peer.Name, cs.GetUuid(), cs.GetSourceIssi(),
 			cs.GetDestGssi(), uint8(cs.GetPriority()), uint16(cs.GetService()))
@@ -824,12 +691,10 @@ func (h *Hub) handleCallStart(peer *Peer, ctrl *federationv2pb.Control, cs *fede
 	defer h.mu.RUnlock()
 	h.callMu.Lock()
 	defer h.callMu.Unlock()
-	seen := map[string]bool{peer.Name: true}
 	for _, p := range h.peers {
-		if seen[p.Name] || IsInPath(ctrl, p.Name) {
+		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
 			continue
 		}
-		seen[p.Name] = true
 		_ = p.SendControl(relay)
 		h.activeCalls[cs.GetUuid()][p.Name] = true
 	}
@@ -840,15 +705,8 @@ func (h *Hub) handleCallEnd(peer *Peer, ctrl *federationv2pb.Control, ce *federa
 		h.handler.OnPeerCallEnd(peer.Name, ce.GetUuid(), uint8(ce.GetCause()))
 	}
 	h.callMu.Lock()
-	_, wasPrivate := h.privateCalls[ce.GetUuid()]
-	delete(h.privateCalls, ce.GetUuid())
 	delete(h.activeCalls, ce.GetUuid())
 	h.callMu.Unlock()
-
-	// Private calls are point-to-point: the destination peer never relays.
-	if wasPrivate {
-		return
-	}
 
 	if !h.mesh.ShouldRelay(ctrl) {
 		return
@@ -856,12 +714,10 @@ func (h *Hub) handleCallEnd(peer *Peer, ctrl *federationv2pb.Control, ce *federa
 	relay := h.mesh.PrepareRelay(ctrl)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	seen := map[string]bool{peer.Name: true}
 	for _, p := range h.peers {
-		if seen[p.Name] || IsInPath(ctrl, p.Name) {
+		if p.Name == peer.Name || IsInPath(ctrl, p.Name) {
 			continue
 		}
-		seen[p.Name] = true
 		_ = p.SendControl(relay)
 	}
 }
@@ -893,28 +749,31 @@ func (h *Hub) handleStationUpdate(peer *Peer, ctrl *federationv2pb.Control, su *
 	}
 }
 
-// handleVoiceFrame delivers an incoming voice frame to the local Brew
-// service. It does NOT fan the frame out to other federation peers.
-//
-// Voice frames carry no msg_id, TTL, or path, so there is no receive-side
-// dedup; in a full mesh (every node dials every other node directly) every
-// peer already receives each frame once via the originator's
-// BroadcastVoiceFrame. A receive-side relay creates an infinite loop —
-// frames bounce between nodes forever, multiplying every hop. Under load
-// this saturated the 256-slot send buffers (millions of drops per minute
-// in the peer-stats log) and crowded out the control plane.
-//
-// Trade-off: nodes that can't directly reach each other (e.g. behind
-// asymmetric NAT) will not receive voice via a relaying middleman. Adding
-// msg_id + path to VoiceFrame in the proto would restore multi-hop with
-// safe dedup; for now, full mesh + no relay is correct.
+
 func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
 	if len(callUUID) != 36 {
 		return
 	}
+
+	// Forward to local Brew service
 	if h.handler != nil {
 		h.handler.OnPeerVoiceFrame(peer.Name, callUUID, frameData)
 	}
+
+	// Mesh relay: forward to ALL other connected peers (not just call
+	// participants) so voice reaches indirectly connected servers. Dedup
+	// by peer.Name — h.peers has two entries per peer (outgoing + incoming)
+	// and voice frames have no msg_id for receive-side dedup.
+	h.mu.RLock()
+	seen := map[string]bool{peer.Name: true}
+	for _, p := range h.peers {
+		if seen[p.Name] {
+			continue
+		}
+		seen[p.Name] = true
+		p.SendVoiceFrame(callUUID, frameData)
+	}
+	h.mu.RUnlock()
 }
 
 // ==================================================================
@@ -1004,12 +863,7 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 	if h.activeCalls[callUUID] == nil {
 		h.activeCalls[callUUID] = make(map[string]bool)
 	}
-	seen := make(map[string]bool, len(h.peers))
 	for _, peer := range h.peers {
-		if seen[peer.Name] {
-			continue
-		}
-		seen[peer.Name] = true
 		_ = peer.SendControl(ctrl)
 		h.activeCalls[callUUID][peer.Name] = true
 	}
@@ -1040,10 +894,10 @@ func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, tmoSite str
 		Origin: h.serverName,
 		Payload: &federationv2pb.Control_PositionSample{
 			PositionSample: &federationv2pb.PositionSample{
-				Issi:    issi,
-				Lat:     lat,
-				Lon:     lon,
-				TmoSite: tmoSite,
+				Issi:     issi,
+				Lat:      lat,
+				Lon:      lon,
+				TmoSite:  tmoSite,
 			},
 		},
 	}
@@ -1108,93 +962,6 @@ func (h *Hub) BroadcastSDS(sourceISSI, destISSI uint32, sdsDataHex string) {
 	h.broadcastToAllPeers(ctrl)
 }
 
-// RouteCallStartToPeerForISSI sends a private-call CallStart to the single
-// peer that owns destISSI and records the routing in privateCalls so the
-// matching voice frames and CallEnd take the same one-to-one path. Returns
-// the peer name and true if the ISSI was found; ok=false leaves the caller
-// to handle "destination not federated" (no broadcast).
-func (h *Hub) RouteCallStartToPeerForISSI(callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16) (string, bool) {
-	peer := h.FindPeerForISSI(destISSI)
-	if peer == nil {
-		return "", false
-	}
-	ctrl := &federationv2pb.Control{
-		Origin: h.serverName,
-		Payload: &federationv2pb.Control_CallStart{
-			CallStart: &federationv2pb.CallStart{
-				Uuid:       callUUID,
-				SourceIssi: sourceISSI,
-				DestIssi:   destISSI,
-				Priority:   uint32(priority),
-				Service:    uint32(service),
-			},
-		},
-	}
-	h.mesh.PrepareOutgoing(ctrl)
-	_ = peer.SendControl(ctrl)
-	h.callMu.Lock()
-	h.privateCalls[callUUID] = peer.Name
-	h.callMu.Unlock()
-	return peer.Name, true
-}
-
-// RouteVoiceFrameForCall forwards a voice frame to the single peer recorded
-// for a private call, or falls through to the all-peers broadcast used by
-// group calls when there is no per-call peer.
-func (h *Hub) RouteVoiceFrameForCall(callUUID string, frameData []byte) {
-	h.callMu.RLock()
-	peerName, ok := h.privateCalls[callUUID]
-	h.callMu.RUnlock()
-	if !ok {
-		h.BroadcastVoiceFrame(callUUID, frameData)
-		return
-	}
-	h.mu.RLock()
-	peer := h.peers[peerName]
-	if peer == nil {
-		peer = h.peers[peerName+":in"]
-	}
-	h.mu.RUnlock()
-	if peer == nil {
-		return
-	}
-	_ = peer.SendVoiceFrame(callUUID, frameData)
-}
-
-// RouteCallEndForCall sends a CallEnd to the single peer recorded for a
-// private call (then forgets it), or falls through to the all-peers
-// broadcast used by group calls.
-func (h *Hub) RouteCallEndForCall(callUUID string, cause uint8) {
-	h.callMu.Lock()
-	peerName, ok := h.privateCalls[callUUID]
-	delete(h.privateCalls, callUUID)
-	h.callMu.Unlock()
-	if !ok {
-		h.BroadcastCallEnd(callUUID, cause)
-		return
-	}
-	h.mu.RLock()
-	peer := h.peers[peerName]
-	if peer == nil {
-		peer = h.peers[peerName+":in"]
-	}
-	h.mu.RUnlock()
-	if peer == nil {
-		return
-	}
-	ctrl := &federationv2pb.Control{
-		Origin: h.serverName,
-		Payload: &federationv2pb.Control_CallEnd{
-			CallEnd: &federationv2pb.CallEnd{
-				Uuid:  callUUID,
-				Cause: uint32(cause),
-			},
-		},
-	}
-	h.mesh.PrepareOutgoing(ctrl)
-	_ = peer.SendControl(ctrl)
-}
-
 // FindPeerForISSI returns the peer that has the given ISSI, or nil.
 func (h *Hub) FindPeerForISSI(issi uint32) *Peer {
 	h.mu.RLock()
@@ -1237,7 +1004,6 @@ func (h *Hub) PeerSnapshots() []PeerSnapshot {
 			Direction: p.Direction,
 			ISSIs:     p.ISSIs(),
 			GSSIs:     p.GSSIs(),
-			Buffer:    p.BufferStats(),
 		})
 	}
 	return out
@@ -1249,7 +1015,6 @@ type PeerSnapshot struct {
 	Direction string              `json:"direction"`
 	ISSIs     []uint32            `json:"issis"`
 	GSSIs     map[uint32][]uint32 `json:"gssis"`
-	Buffer    PeerBufferStats     `json:"buffer"`
 }
 
 // ==================================================================
@@ -1378,68 +1143,13 @@ func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
 }
 
 func (h *Hub) registerPeer(peer *Peer) {
-	key := peerKey(peer.Name, peer.Direction)
-	h.redeemPending(peer, key)
-
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	key := peerKey(peer.Name, peer.Direction)
 	if old, ok := h.peers[key]; ok {
 		old.Close()
 	}
 	h.peers[key] = peer
-}
-
-// redeemPending transfers ISSI/GSSI tables from a pending (disconnected)
-// peer at the given key into the freshly-connected peer, and cancels the
-// pending-cleanup timer. No-op if there's nothing pending. Called from
-// registerPeer for the bootstrap-name case and from renamePeer for the
-// Hello-discovered-name case.
-func (h *Hub) redeemPending(newPeer *Peer, key string) {
-	h.pendingMu.Lock()
-	pending, ok := h.pendingPeers[key]
-	if !ok {
-		h.pendingMu.Unlock()
-		return
-	}
-	pending.timer.Stop()
-	delete(h.pendingPeers, key)
-	h.pendingMu.Unlock()
-
-	adoptPeerState(newPeer, pending.peer)
-	h.logger.Printf("federation: redeemed peer %s — kept %d ISSIs across reconnect",
-		newPeer.Name, len(newPeer.ISSIs()))
-}
-
-// adoptPeerState copies subscriber tables from src into dst. The dst peer
-// is assumed to be freshly created (its tables empty); we replace rather
-// than merge.
-func adoptPeerState(dst, src *Peer) {
-	src.mu.RLock()
-	issis := make(map[uint32]bool, len(src.issis))
-	for k, v := range src.issis {
-		issis[k] = v
-	}
-	gssis := make(map[uint32]map[uint32]bool, len(src.gssiAffiliations))
-	for g, members := range src.gssiAffiliations {
-		m := make(map[uint32]bool, len(members))
-		for k, v := range members {
-			m[k] = v
-		}
-		gssis[g] = m
-	}
-	src.mu.RUnlock()
-
-	dst.mu.Lock()
-	dst.issis = issis
-	dst.gssiAffiliations = gssis
-	dst.mu.Unlock()
-
-	// Empty src so a late-firing cleanup timer doesn't double-log the
-	// ISSI count we just transferred.
-	src.mu.Lock()
-	src.issis = make(map[uint32]bool)
-	src.gssiAffiliations = make(map[uint32]map[uint32]bool)
-	src.mu.Unlock()
 }
 
 // renamePeer updates a peer's Name and moves it to the correct map slot.
@@ -1449,22 +1159,15 @@ func (h *Hub) renamePeer(peer *Peer, newName string) {
 	oldName := peer.Name
 	oldKey := peerKey(oldName, peer.Direction)
 	newKey := peerKey(newName, peer.Direction)
-	if oldKey == newKey {
-		h.mu.Unlock()
-		return
+	if oldKey != newKey {
+		if existing, ok := h.peers[newKey]; ok && existing != peer {
+			existing.Close()
+		}
+		delete(h.peers, oldKey)
+		peer.Name = newName
+		h.peers[newKey] = peer
 	}
-	if existing, ok := h.peers[newKey]; ok && existing != peer {
-		existing.Close()
-	}
-	delete(h.peers, oldKey)
-	peer.Name = newName
-	h.peers[newKey] = peer
 	h.mu.Unlock()
-
-	// Bootstrap dials register under e.g. "peer-0"; the real name only
-	// arrives via Hello. Any redemption state was filed under the real
-	// name, so the second chance to adopt it is here.
-	h.redeemPending(peer, newKey)
 
 	// Also relabel in the known-peers map so future gossip dedup works.
 	h.knownMu.Lock()
@@ -1485,54 +1188,16 @@ func peerKey(name, direction string) string {
 }
 
 func (h *Hub) unregisterPeer(peer *Peer) {
+	peer.Cleanup()
 	peer.Close()
-
 	h.mu.Lock()
-	var key string
-	for k, p := range h.peers {
+	for key, p := range h.peers {
 		if p == peer {
-			key = k
-			delete(h.peers, k)
+			delete(h.peers, key)
 			break
 		}
 	}
 	h.mu.Unlock()
-
-	if key == "" {
-		// Peer was already removed — either redemption already adopted
-		// its state into a replacement, or this is the (now-removed)
-		// double cleanup call. Nothing else to do.
-		return
-	}
-
-	// Hold the peer's subscriber tables for a grace window so a quick
-	// reconnect can pick them back up without a sync round-trip.
-	h.schedulePendingCleanup(key, peer)
-}
-
-func (h *Hub) schedulePendingCleanup(key string, peer *Peer) {
-	h.pendingMu.Lock()
-	defer h.pendingMu.Unlock()
-	// If an older pending entry still sits at this key (shouldn't normally
-	// happen — registerPeer redeems on reconnect), retire it now.
-	if old, ok := h.pendingPeers[key]; ok && old.peer != peer {
-		old.timer.Stop()
-		old.peer.Cleanup()
-		delete(h.pendingPeers, key)
-	}
-	if _, ok := h.pendingPeers[key]; ok {
-		return
-	}
-	timer := time.AfterFunc(peerRedemptionWindow, func() {
-		h.pendingMu.Lock()
-		cur, ok := h.pendingPeers[key]
-		if ok && cur.peer == peer {
-			delete(h.pendingPeers, key)
-		}
-		h.pendingMu.Unlock()
-		peer.Cleanup()
-	})
-	h.pendingPeers[key] = &pendingPeer{peer: peer, timer: timer}
 }
 
 func (h *Hub) sendFullSync(peer *Peer) {
@@ -1555,37 +1220,54 @@ func (h *Hub) sendFullSync(peer *Peer) {
 	h.logger.Printf("federation: sent sync to %s (%d subscribers)", peer.Name, len(subs))
 }
 
-// broadcastToAllPeers sends ctrl once per distinct peer name. h.peers may
-// hold both an outgoing and an incoming Peer for the same remote (keyed
-// "name" and "name:in"); without dedup every broadcast would be delivered
-// twice, doubling control-plane traffic and the per-peer 256-slot send
-// buffer pressure.
 func (h *Hub) broadcastToAllPeers(ctrl *federationv2pb.Control) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	seen := make(map[string]bool, len(h.peers))
 	for _, peer := range h.peers {
-		if seen[peer.Name] {
-			continue
-		}
-		seen[peer.Name] = true
 		_ = peer.SendControl(ctrl)
 	}
 }
 
-// relayToPeers forwards ctrl to every peer except excludeName (the source)
-// and any peer already in ctrl.Path. The path check avoids enqueueing
-// messages the remote would just drop via mesh-dedup — important because
-// every queued-then-dropped message still costs a 256-slot buffer slot.
 func (h *Hub) relayToPeers(ctrl *federationv2pb.Control, excludeName string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	seen := map[string]bool{excludeName: true}
 	for _, peer := range h.peers {
-		if seen[peer.Name] || IsInPath(ctrl, peer.Name) {
-			continue
+		if peer.Name != excludeName {
+			_ = peer.SendControl(ctrl)
 		}
-		seen[peer.Name] = true
-		_ = peer.SendControl(ctrl)
 	}
+}
+
+// =============================================================================
+// TODO: private call routing stubs.
+//
+// federation_bridge.go (from feat/federation-duplex-proxy, now on master) calls
+// these three Route* methods. They were implemented on top of the JSON-Message
+// world in feat/federation-pr / feat/federation-duplex-proxy. This branch's
+// typed-protobuf refactor predates that work, so the methods need to be
+// reimplemented on top of the typed-protobuf core. See PR #5
+// (feat/federation-protobuf-fixes) for the rest of the federation-pr fixes
+// ported onto this branch.
+//
+// These stubs let the merged tree compile. They MUST be reimplemented before
+// federation is treated as production-ready — federation will otherwise
+// silently drop private calls.
+
+func (h *Hub) RouteCallStartToPeerForISSI(callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16) (string, bool) {
+	_ = callUUID
+	_ = sourceISSI
+	_ = destISSI
+	_ = priority
+	_ = service
+	return "", false
+}
+
+func (h *Hub) RouteCallEndForCall(callUUID string, cause uint8) {
+	_ = callUUID
+	_ = cause
+}
+
+func (h *Hub) RouteVoiceFrameForCall(callUUID string, frameData []byte) {
+	_ = callUUID
+	_ = frameData
 }
