@@ -431,33 +431,50 @@ func (s *Service) onCallControlFromClient(client *brew.Client, m *brew.CallContr
 
 	recipients := 0
 	route := "destination"
-	if targetClientID != "" {
-		if s.server.SendToClient(targetClientID, wire) {
+	// Try federation-reply first for private-call signaling states (5/6/8)
+	// when the call is tracked in the federation hub's privateCalls map.
+	// NotifyCallReply returns true iff the call is federated; if not,
+	// fall through to the normal local routing below. This covers two
+	// cases the older "only when targetClientID == federation:*" check
+	// missed:
+	//
+	//   1. targetClientID="federation:<peer>" — call originated on a
+	//      remote peer; reply goes back via federation. (The original
+	//      case for the answerer's side of a private call.)
+	//   2. targetClientID="" but destination is a federated ISSI —
+	//      call originated locally (e.g. the proxy bridge), no local
+	//      sub for the destination, must traverse federation. Without
+	//      this branch the ConnectRequest from the answer was being
+	//      broadcast to zero local recipients and silently dropped.
+	if isCallReplyState(m.CallState) && s.federation != nil {
+		cause := uint8(0)
+		if cp, ok := m.Payload.(brew.CausePayload); ok {
+			cause = cp.Cause
+		}
+		if s.federation.NotifyCallReply(m.Identifier.String(), m.CallState, cause) {
 			recipients = 1
-			route = "origin-client"
-		} else if isFederationTarget(targetClientID) && isCallReplyState(m.CallState) && s.federation != nil {
-			// Private-call reply (SetupAccept / SetupReject / ConnectRequest)
-			// going back to the federation peer that owns this call. The
-			// "federation:<peer>" target_client is just a marker — there's
-			// no real local client to SendToClient. Route it across the
-			// federation via the CallReply control message.
-			cause := uint8(0)
-			if cp, ok := m.Payload.(brew.CausePayload); ok {
-				cause = cp.Cause
-			}
-			if s.federation.NotifyCallReply(m.Identifier.String(), m.CallState, cause) {
+			route = "federation-reply"
+		}
+	}
+
+	if recipients == 0 {
+		if targetClientID != "" {
+			if s.server.SendToClient(targetClientID, wire) {
 				recipients = 1
-				route = "federation-reply"
-			} else {
+				route = "origin-client"
+			} else if isFederationTarget(targetClientID) {
+				// federation:<peer> hint but the call wasn't tracked
+				// as private (e.g. group-call origin). Fall through
+				// to broadcast.
 				recipients = s.broadcastByDestinationType(destinationType, dest, wire, client.ID)
 				route = "federation-reply-fallback"
+			} else {
+				recipients = s.broadcastByDestinationType(destinationType, dest, wire, client.ID)
+				route = "origin-client-fallback"
 			}
 		} else {
 			recipients = s.broadcastByDestinationType(destinationType, dest, wire, client.ID)
-			route = "origin-client-fallback"
 		}
-	} else {
-		recipients = s.broadcastByDestinationType(destinationType, dest, wire, client.ID)
 	}
 	s.logger.Printf(
 		"session=%s call-control state=%d call=%s source=%d destination=%d destination_type=%s recipients=%d route=%s target_client=%s",
