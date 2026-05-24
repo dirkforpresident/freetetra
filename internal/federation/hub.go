@@ -812,30 +812,28 @@ func (h *Hub) handleStationUpdate(peer *Peer, ctrl *federationv2pb.Control, su *
 	}
 }
 
+// handleVoiceFrame delivers an incoming voice frame to the local Brew
+// service. It does NOT fan the frame out to other federation peers.
+//
+// Voice frames carry no msg_id, TTL, or path, so there is no receive-side
+// dedup; in a full mesh (every node dials every other node directly) every
+// peer already receives each frame once via the originator's
+// BroadcastVoiceFrame. A receive-side relay creates an infinite loop —
+// frames bounce between nodes forever, multiplying every hop. Under load
+// this saturated the 256-slot send buffers (millions of drops per minute
+// in the peer-stats log) and crowded out the control plane.
+//
+// Trade-off: nodes that can't directly reach each other (e.g. behind
+// asymmetric NAT) will not receive voice via a relaying middleman. Adding
+// msg_id + path to VoiceFrame in the proto would restore multi-hop with
+// safe dedup; for now, full mesh + no relay is correct.
 func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
 	if len(callUUID) != 36 {
 		return
 	}
-
-	// Forward to local Brew service
 	if h.handler != nil {
 		h.handler.OnPeerVoiceFrame(peer.Name, callUUID, frameData)
 	}
-
-	// Mesh relay: forward to ALL other connected peers (not just call
-	// participants) so voice reaches indirectly connected servers. Dedup
-	// by peer.Name — h.peers has two entries per peer (outgoing + incoming)
-	// and voice frames have no msg_id for receive-side dedup.
-	h.mu.RLock()
-	seen := map[string]bool{peer.Name: true}
-	for _, p := range h.peers {
-		if seen[p.Name] {
-			continue
-		}
-		seen[p.Name] = true
-		p.SendVoiceFrame(callUUID, frameData)
-	}
-	h.mu.RUnlock()
 }
 
 // ==================================================================
