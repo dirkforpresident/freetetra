@@ -69,6 +69,19 @@ func (f *fakeProxyPlane) SendConnectRequest(callID uuid.UUID, p brew.CircularCal
 	return true
 }
 
+func (f *fakeProxyPlane) SendConnectConfirm(callID uuid.UUID, grant uint8, permission uint8) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, fakeEvent{
+		kind:   "connect-confirm",
+		callID: callID,
+		// repurpose source/dest to carry grant/permission for assertion
+		source: uint32(grant),
+		dest:   uint32(permission),
+	})
+	return true
+}
+
 func (f *fakeProxyPlane) SendCallRelease(callID uuid.UUID, cause uint8) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -148,18 +161,41 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 		t.Fatalf("outbound and inbound call IDs collide")
 	}
 
-	// Outbound accepted -> expect ConnectRequest.
+	// Outbound SetupAccept -> bridge transitions to "ringing" state
+	// internally but does NOT emit any wire message. (Sending ConnectRequest
+	// here would be premature — the user hasn't picked up yet.)
 	b.OnBrewCallControl(&brew.CallControlMessage{
 		CallState:  brew.CallStateSetupAccept,
 		Identifier: outboundCallID,
 		Payload:    brew.EmptyPayload{},
 	})
+	if got := len(plane.findKind("connect-req")); got != 0 {
+		t.Fatalf("SetupAccept should NOT emit ConnectRequest yet, got %d", got)
+	}
+	if got := len(plane.findKind("connect-confirm")); got != 0 {
+		t.Fatalf("SetupAccept should NOT emit ConnectConfirm yet, got %d", got)
+	}
+
+	// Outbound ConnectRequest (the actual user-picked-up event) -> bridge
+	// fans ConnectRequest on inbound + ConnectConfirm on outbound.
+	b.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateConnectRequest,
+		Identifier: outboundCallID,
+		Payload:    brew.EmptyPayload{},
+	})
 	connects := plane.findKind("connect-req")
-	if len(connects) != 1 || connects[0].callID != outboundCallID || connects[0].source != 999 || connects[0].dest != 1002 {
-		t.Fatalf("expected ConnectRequest on outbound 999->1002, got %#v", connects)
+	if len(connects) != 1 || connects[0].callID != inboundCallID || connects[0].source != 999 || connects[0].dest != 1001 {
+		t.Fatalf("expected single ConnectRequest on INBOUND (bridge->caller 999->1001), got %#v", connects)
 	}
 	if connects[0].duplex != 1 {
-		t.Fatalf("outbound ConnectRequest duplex flag not mirrored: got %d want 1", connects[0].duplex)
+		t.Fatalf("inbound ConnectRequest duplex flag not mirrored: got %d want 1", connects[0].duplex)
+	}
+	confirms := plane.findKind("connect-confirm")
+	if len(confirms) != 1 || confirms[0].callID != outboundCallID {
+		t.Fatalf("expected single ConnectConfirm on outbound, got %#v", confirms)
+	}
+	if confirms[0].source != 1 || confirms[0].dest != 1 {
+		t.Fatalf("outbound ConnectConfirm grant/permission should be 1/1, got %d/%d", confirms[0].source, confirms[0].dest)
 	}
 
 	// Voice on inbound -> relayed to outbound.
@@ -204,9 +240,12 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 
 // TestProxyBridge_OutboundConnectForwardsToInbound exercises the state=8
 // (ConnectRequest) path — the actual "user picked up" event that arrives
-// from the target's BS. The proxy must fan ConnectRequest out on BOTH
-// the inbound and outbound legs so the caller's radio sees the answer
-// instead of timing out as "no answer".
+// from the target's BS. The proxy must:
+//   - emit ConnectRequest on the INBOUND leg (so the caller's radio sees
+//     the answer and stops "ringing back"), and
+//   - emit ConnectConfirm (state=9) on the OUTBOUND leg (so the
+//     answerer's BS clears its connect-phase timer and doesn't drop
+//     the call as ExpiryOfTimer).
 func TestProxyBridge_OutboundConnectForwardsToInbound(t *testing.T) {
 	b, plane := newTestProxy(t, 999, 1002, 10*time.Second, 60*time.Second, 4)
 
@@ -235,35 +274,29 @@ func TestProxyBridge_OutboundConnectForwardsToInbound(t *testing.T) {
 	})
 
 	connects := plane.findKind("connect-req")
-	if len(connects) != 2 {
-		t.Fatalf("expected 2 ConnectRequests (inbound + outbound), got %d: %#v", len(connects), connects)
+	if len(connects) != 1 {
+		t.Fatalf("expected exactly 1 ConnectRequest on INBOUND, got %d: %#v", len(connects), connects)
 	}
-	gotInbound := false
-	gotOutbound := false
-	for _, c := range connects {
-		switch c.callID {
-		case inboundCallID:
-			gotInbound = true
-			if c.source != 999 || c.dest != 1001 {
-				t.Fatalf("inbound ConnectRequest src/dst should be bridge->caller (999->1001), got %d->%d", c.source, c.dest)
-			}
-			if c.duplex != 1 {
-				t.Fatalf("inbound ConnectRequest duplex flag not mirrored: got %d", c.duplex)
-			}
-		case outboundCallID:
-			gotOutbound = true
-			if c.source != 999 || c.dest != 1002 {
-				t.Fatalf("outbound ConnectRequest src/dst should be bridge->target (999->1002), got %d->%d", c.source, c.dest)
-			}
-		default:
-			t.Fatalf("unexpected ConnectRequest on unknown callID %s", c.callID)
-		}
+	if connects[0].callID != inboundCallID {
+		t.Fatalf("ConnectRequest should be on INBOUND callID, got %s (inbound is %s)", connects[0].callID, inboundCallID)
 	}
-	if !gotInbound {
-		t.Fatalf("missing ConnectRequest on INBOUND leg — caller's radio will time out as no-answer")
+	if connects[0].source != 999 || connects[0].dest != 1001 {
+		t.Fatalf("inbound ConnectRequest src/dst should be bridge->caller (999->1001), got %d->%d", connects[0].source, connects[0].dest)
 	}
-	if !gotOutbound {
-		t.Fatalf("missing ConnectRequest on OUTBOUND leg — target BS won't see the connect confirm")
+	if connects[0].duplex != 1 {
+		t.Fatalf("inbound ConnectRequest duplex flag not mirrored: got %d", connects[0].duplex)
+	}
+
+	confirms := plane.findKind("connect-confirm")
+	if len(confirms) != 1 {
+		t.Fatalf("expected exactly 1 ConnectConfirm on OUTBOUND, got %d: %#v", len(confirms), confirms)
+	}
+	if confirms[0].callID != outboundCallID {
+		t.Fatalf("ConnectConfirm should be on OUTBOUND callID, got %s (outbound is %s)", confirms[0].callID, outboundCallID)
+	}
+	// fakeProxyPlane.SendConnectConfirm repurposes source=grant, dest=permission.
+	if confirms[0].source != 1 || confirms[0].dest != 1 {
+		t.Fatalf("ConnectConfirm grant/permission should be 1/1, got %d/%d", confirms[0].source, confirms[0].dest)
 	}
 }
 

@@ -393,6 +393,13 @@ func (p *BrewModulePlane) SendConnectRequest(callID uuid.UUID, payload brew.Circ
 	return p.enqueue(brew.BuildConnectRequest(callID, payload))
 }
 
+func (p *BrewModulePlane) SendConnectConfirm(callID uuid.UUID, grant uint8, permission uint8) bool {
+	return p.enqueue(brew.BuildConnectConfirm(callID, brew.CircularGrantPayload{
+		Grant:      grant,
+		Permission: permission,
+	}))
+}
+
 func (p *BrewModulePlane) SendCallRelease(callID uuid.UUID, cause uint8) bool {
 	return p.enqueue(brew.BuildCallRelease(callID, cause))
 }

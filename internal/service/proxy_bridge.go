@@ -21,11 +21,16 @@ import (
 // Communication, Priority) onto the outbound leg. A naive (source, dest)-only
 // API would default everything to zero — making the outbound leg simplex even
 // when the inbound caller dialed duplex.
+//
+// SendConnectConfirm is the network's response to a U-CONNECT/ConnectRequest
+// from the answering BS — without it the BS's connect-phase timer expires
+// and the call drops as "no answer" even after the user picked up.
 type ProxyPlane interface {
 	SendSetupRequest(callID uuid.UUID, payload brew.CircularCallPayload) bool
 	SendSetupAccept(callID uuid.UUID) bool
 	SendSetupReject(callID uuid.UUID, cause uint8) bool
 	SendConnectRequest(callID uuid.UUID, payload brew.CircularCallPayload) bool
+	SendConnectConfirm(callID uuid.UUID, grant uint8, permission uint8) bool
 	SendCallRelease(callID uuid.UUID, cause uint8) bool
 	InjectedVoiceFrame(origin string, callID uuid.UUID, data []byte)
 }
@@ -288,32 +293,45 @@ func (b *ProxyBridge) handleOutboundAccept(callID uuid.UUID) {
 		b.mu.Unlock()
 		return
 	}
-	s.state = proxyStateConnected
-	s.lastFrameAt = b.now()
+	// State=5 SetupAccept just means "BS allocated a circuit, ringing the
+	// callee now" — NOT that the user has picked up. We used to send
+	// ConnectRequest on the outbound here, which arrived at the answerer's
+	// BS before the user had even answered, confusing the BS's state
+	// machine. Hold off until state=8 ConnectRequest (the real answer) in
+	// handleOutboundConnect.
 	inbound := s.inboundCallID
 	outbound := s.outboundCallID
-	payload := b.outboundPayload(s)
 	b.mu.Unlock()
 
 	b.logger.Printf(
-		"proxy outbound accept inbound_call=%s outbound_call=%s",
+		"proxy outbound accept (ringing) inbound_call=%s outbound_call=%s",
 		inbound.String(),
 		outbound.String(),
 	)
-	b.plane.SendConnectRequest(outbound, payload)
 }
 
 // handleOutboundConnect runs when the target subscriber actually picks up
 // (brew state 8 / ConnectRequest, forwarded by the BS's CMCE from the
-// radio's U-CONNECT). The proxy mirrors a matching ConnectRequest onto
-// the inbound leg so the caller's radio transitions out of "ringing back"
-// and into "connected". Without this, the caller's BS times out the
-// outgoing call as "no answer" even though the target subscriber did
-// pick up.
+// radio's U-CONNECT). The proxy performs the two-leg signaling that
+// completes the bridge:
 //
-// Outbound-side ConnectRequest is also re-emitted as an idempotent
-// confirmation — the target BS expects to see one back from us after the
-// U-CONNECT/ConnectRequest signaling round-trip.
+//   1. INBOUND leg → SendConnectRequest with Source=bridge, Dest=caller.
+//      The caller's radio is sitting in "ringing back" after our
+//      SetupAccept and needs this to transition into "connected".
+//      Without it, the caller's BS times out the call as "no answer"
+//      even though the target picked up.
+//
+//   2. OUTBOUND leg → SendConnectConfirm (brew state 9) with Grant=1,
+//      Permission=1. This is the network's response that the target BS's
+//      connect-phase timer is waiting on after it forwarded the
+//      U-CONNECT. Sending ConnectRequest (state=8) instead — which an
+//      earlier version of this code did — leaves the timer running
+//      because state=8 isn't the acknowledgment shape the BS wants;
+//      the BS then expires the call as ExpiryOfTimer.
+//
+// service.go's virtual-circuit code (search BuildConnectConfirm) does
+// the same for in-bluestation MS-to-MS calls; this brings the
+// federated path to parity.
 func (b *ProxyBridge) handleOutboundConnect(callID uuid.UUID) {
 	b.mu.Lock()
 	s := b.sessions[callID]
@@ -331,12 +349,9 @@ func (b *ProxyBridge) handleOutboundConnect(callID uuid.UUID) {
 	s.lastFrameAt = b.now()
 	inbound := s.inboundCallID
 	outbound := s.outboundCallID
-	outboundPayload := b.outboundPayload(s)
-	// Inbound-leg ConnectRequest is what the caller's radio is waiting
-	// for. The payload mirrors the call-mode flags (Duplex, Method,
-	// Communication, Priority, Service) from the original inbound setup
-	// and uses the bridge as the answerer (Source=bridge, Dest=caller).
-	// Grant + Permission match the pattern used by the SIP bridge.
+	// Inbound-leg ConnectRequest payload: bridge is the answerer toward
+	// the caller, so Source=bridge / Dest=caller. Mirror the call-mode
+	// flags captured at inbound setup.
 	inboundPayload := brew.CircularCallPayload{
 		Source:        b.bridgeISSI,
 		Destination:   s.callerISSI,
@@ -356,10 +371,10 @@ func (b *ProxyBridge) handleOutboundConnect(callID uuid.UUID) {
 		inbound.String(),
 		outbound.String(),
 		inboundPayload.Destination,
-		outboundPayload.Destination,
+		b.targetISSI,
 	)
 	b.plane.SendConnectRequest(inbound, inboundPayload)
-	b.plane.SendConnectRequest(outbound, outboundPayload)
+	b.plane.SendConnectConfirm(outbound, 1, 1)
 }
 
 func (b *ProxyBridge) handleLegFailure(callID uuid.UUID, cause uint8, reason string) {
