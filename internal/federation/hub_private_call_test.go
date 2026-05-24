@@ -60,6 +60,7 @@ func (noopHandler) OnPeerCallStart(string, string, uint32, uint32, uint8, uint16
 func (noopHandler) OnPeerPrivateCallStart(string, string, uint32, uint32, uint8, uint16) {
 }
 func (noopHandler) OnPeerCallEnd(string, string, uint8)                          {}
+func (noopHandler) OnPeerCallReply(string, string, uint8, uint8)                 {}
 func (noopHandler) OnPeerVoiceFrame(string, string, []byte)                      {}
 func (noopHandler) OnPeerSDSRelay(string, uint32, uint32, string)                {}
 func (noopHandler) OnPeerPositionSample(string, uint32, float64, float64, string) {}
@@ -155,6 +156,50 @@ func TestRouteCallStartToPeerForISSI_PeerNotFound(t *testing.T) {
 
 	if len(stream.frames()) != 0 {
 		t.Fatalf("no frames should be sent when no peer owns the ISSI; got %d", len(stream.frames()))
+	}
+}
+
+func TestRouteCallReplyForCall_PeerFound(t *testing.T) {
+	h := newTestHub(t, "selfsite")
+	stream := attachPeer(t, h, "peerB", 2002)
+
+	// First record a private call so RouteCallReplyForCall has a peer to find.
+	if _, ok := h.RouteCallStartToPeerForISSI("uuid-3", 1001, 2002, 0, 0); !ok {
+		t.Fatalf("setup: RouteCallStartToPeerForISSI failed")
+	}
+	waitForSend(t, stream, 1) // drain the CallStart frame
+
+	// SetupAccept reply (state 5) — must reach peerB as a CallReply.
+	if ok := h.RouteCallReplyForCall("uuid-3", 5, 0); !ok {
+		t.Fatalf("RouteCallReplyForCall returned false; expected true (peer recorded)")
+	}
+	waitForSend(t, stream, 2)
+	frames := stream.frames()
+	if len(frames) < 2 {
+		t.Fatalf("expected 2 frames (CallStart + CallReply), got %d", len(frames))
+	}
+	ctrl := frames[1].GetControl()
+	if ctrl == nil {
+		t.Fatalf("second frame is not a Control")
+	}
+	cr := ctrl.GetCallReply()
+	if cr == nil {
+		t.Fatalf("second frame is not a CallReply (got payload %T)", ctrl.GetPayload())
+	}
+	if cr.GetUuid() != "uuid-3" {
+		t.Fatalf("CallReply uuid = %q, want uuid-3", cr.GetUuid())
+	}
+	if cr.GetState() != 5 {
+		t.Fatalf("CallReply state = %d, want 5 (SetupAccept)", cr.GetState())
+	}
+}
+
+func TestRouteCallReplyForCall_UnknownCall(t *testing.T) {
+	h := newTestHub(t, "selfsite")
+	_ = attachPeer(t, h, "peerB", 2002)
+
+	if ok := h.RouteCallReplyForCall("uuid-not-tracked", 5, 0); ok {
+		t.Fatalf("RouteCallReplyForCall returned true for an unknown call")
 	}
 }
 
