@@ -85,6 +85,50 @@ func TestBuildWebRadioFilterChain_ResamplerAppendedLast(t *testing.T) {
 	}
 }
 
+func TestBuildWebRadioFilterChain_LoudnormSinglePass(t *testing.T) {
+	cfg := config.WebRadioConfig{
+		LoudnormMode: "single",
+		LoudnormI:    -16,
+		LoudnormTP:   -1.5,
+		LoudnormLRA:  11,
+	}
+	got := BuildWebRadioFilterChain(cfg)
+	want := "loudnorm=I=-16:TP=-1.5:LRA=11"
+	if got != want {
+		t.Errorf("loudnorm mismatch:\n got = %q\nwant = %q", got, want)
+	}
+}
+
+func TestBuildWebRadioFilterChain_LoudnormOffOmitsFilter(t *testing.T) {
+	cfg := config.WebRadioConfig{
+		LoudnormMode: "off",
+		LoudnormI:    -16,
+		VolumeDB:     -10,
+	}
+	got := BuildWebRadioFilterChain(cfg)
+	if got != "volume=-10dB" {
+		t.Errorf("loudnorm mode=off must not emit filter; got %q", got)
+	}
+}
+
+func TestBuildWebRadioFilterChain_LoudnormPositionBeforeHPF(t *testing.T) {
+	// Position matters: loudnorm needs broadband audio to measure LUFS
+	// correctly, so it has to sit BEFORE the HPF/LPF stages.
+	cfg := config.WebRadioConfig{
+		Compressor:   "acompressor=ratio=3",
+		LoudnormMode: "single",
+		LoudnormI:    -16,
+		LoudnormTP:   -1.5,
+		LoudnormLRA:  11,
+		HPFHz:        120,
+	}
+	got := BuildWebRadioFilterChain(cfg)
+	want := "acompressor=ratio=3,loudnorm=I=-16:TP=-1.5:LRA=11,highpass=f=120"
+	if got != want {
+		t.Errorf("loudnorm ordering wrong:\n got = %q\nwant = %q", got, want)
+	}
+}
+
 func TestBuildWebRadioFilterChain_HPFLPFInsertedBetweenCompressorAndExtra(t *testing.T) {
 	// HPF/LPF must sit between dynamics and any user-supplied tail so that
 	// codec-bound band-limiting is the operator's last *implicit* step

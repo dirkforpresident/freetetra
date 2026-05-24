@@ -174,6 +174,14 @@ type WebRadioConfig struct {
 	// higher-quality SoX-style downsampling). Applied at the end of the
 	// chain so it sees the final, processed signal.
 	Resampler string
+
+	// Loudness normalization (EBU R128 via ffmpeg's loudnorm filter).
+	// LoudnormMode: "off" (default — keep legacy static volume behavior)
+	// or "single" (single-pass live normalization, ~3s look-ahead).
+	LoudnormMode string
+	LoudnormI    float64 // integrated loudness target LUFS; default -16
+	LoudnormTP   float64 // true-peak ceiling dBTP; default -1.5
+	LoudnormLRA  float64 // loudness range LU; default 11
 }
 
 type ZelloConfig struct {
@@ -296,6 +304,10 @@ func LoadFromEnv() (Config, error) {
 			HPFHz:            envInt("WEBRADIO_HPF_HZ", 0),
 			LPFHz:            envInt("WEBRADIO_LPF_HZ", 0),
 			Resampler:        env("WEBRADIO_RESAMPLER", ""),
+			LoudnormMode:     env("WEBRADIO_LOUDNORM_MODE", "off"),
+			LoudnormI:        envFloat("WEBRADIO_LOUDNORM_I", -16),
+			LoudnormTP:       envFloat("WEBRADIO_LOUDNORM_TP", -1.5),
+			LoudnormLRA:      envFloat("WEBRADIO_LOUDNORM_LRA", 11),
 		},
 		Zello: ZelloConfig{
 			Enabled:          envBool("ZELLO_ENABLED", false),

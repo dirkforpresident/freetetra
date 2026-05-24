@@ -32,6 +32,12 @@ func BuildWebRadioFilterChain(cfg config.WebRadioConfig) string {
 		fc.add(fmt.Sprintf("volume=%gdB", cfg.VolumeDB))
 	}
 	fc.add(cfg.Compressor)
+	// loudnorm sits before band-limiting: it should see the broadband
+	// signal so its LUFS measurement reflects what listeners hear, not
+	// just the speech-band slice.
+	if strings.EqualFold(strings.TrimSpace(cfg.LoudnormMode), "single") {
+		fc.add(fmt.Sprintf("loudnorm=I=%g:TP=%g:LRA=%g", cfg.LoudnormI, cfg.LoudnormTP, cfg.LoudnormLRA))
+	}
 	if cfg.HPFHz > 0 {
 		fc.add(fmt.Sprintf("highpass=f=%d", cfg.HPFHz))
 	}
