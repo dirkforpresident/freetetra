@@ -185,6 +185,78 @@ func TestEchoBridgePlaybackAfterCallEnd(t *testing.T) {
 	}
 }
 
+func TestEchoBridgeSkipsOwnPlayback(t *testing.T) {
+	// Regression: without the self-source filter, the echo bridge captures
+	// its own broadcast playback (which goes out on the same TG it listens
+	// on), then plays that back, then captures THAT, ad infinitum — the TG
+	// never releases. With the filter, a GroupTX whose Source equals the
+	// configured playback source ISSI is ignored.
+	cfg := config.Config{Echo: config.EchoConfig{
+		Talkgroup:     10002,
+		SourceISSI:    899002,
+		PlaybackDelay: 0,
+		FrameInterval: time.Millisecond,
+		ReleaseCause:  7,
+		MaxFrames:     64,
+	}}
+	plane := newEchoPlaneStub()
+	logger := log.New(bytes.NewBuffer(nil), "", 0)
+
+	bridge, err := NewEchoBridge(cfg, logger, plane)
+	if err != nil {
+		t.Fatalf("new bridge: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := bridge.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer bridge.Stop()
+
+	// First incoming call from a real subscriber (Source=501): captured.
+	realCall := uuid.New()
+	bridge.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateGroupTX,
+		Identifier: realCall,
+		Payload:    brew.GroupTransmissionPayload{Source: 501, Destination: 10002, Priority: 2, Access: 3, Service: 5},
+	})
+	bridge.OnBrewFrame(realCall, brew.FrameTypeTrafficChannel, []byte{0x80, 0x01})
+	bridge.OnBrewCallControl(&brew.CallControlMessage{CallState: brew.CallStateCallRelease, Identifier: realCall})
+
+	// Wait for the real playback to start so we can observe the count.
+	waitFor(t, 500*time.Millisecond, func() bool {
+		s, _, _, _ := plane.snapshot()
+		return len(s) == 1
+	})
+
+	// Simulate the echo bridge's own playback coming back as a GroupTX
+	// (the brew server broadcasts it to all TG subscribers — including the
+	// echo client itself, which then has to drop it on the floor).
+	selfPlaybackCall := uuid.New()
+	bridge.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateGroupTX,
+		Identifier: selfPlaybackCall,
+		Payload:    brew.GroupTransmissionPayload{Source: 899002, Destination: 10002, Priority: 2, Access: 3, Service: 5},
+	})
+	bridge.OnBrewFrame(selfPlaybackCall, brew.FrameTypeTrafficChannel, []byte{0x80, 0x99})
+	bridge.OnBrewCallControl(&brew.CallControlMessage{CallState: brew.CallStateCallRelease, Identifier: selfPlaybackCall})
+
+	// Give finalizeCapture's 200ms grace window time to fire.
+	waitFor(t, 600*time.Millisecond, func() bool {
+		// Nothing more to wait for — we just want the time to pass and then
+		// assert no second playback started.
+		return true
+	})
+
+	starts, _, _, _ := plane.snapshot()
+	if len(starts) != 1 {
+		t.Fatalf("expected exactly one playback (for the real call); got %d — self-source echo loop is NOT being filtered", len(starts))
+	}
+	if starts[0].sourceISSI != 899002 {
+		t.Fatalf("expected real playback to carry our SourceISSI=899002 (the bridge's own ISSI rebroadcast), got %d", starts[0].sourceISSI)
+	}
+}
+
 func TestEchoBridgeRequiresTalkgroup(t *testing.T) {
 	cfg := config.Config{}
 	logger := log.New(bytes.NewBuffer(nil), "", 0)
