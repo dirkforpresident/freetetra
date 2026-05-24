@@ -1,6 +1,6 @@
 # FreeTetra
 
-Federated TETRA backhaul server for amateur radio.
+Federated TETRA backhaul server. Self-hosted, decentralized, anyone can join.
 
 A drop-in Brew server that peers with other FreeTetra servers and exchanges
 subscribers, calls, voice frames, SDS, BlueStation telemetry and coverage
@@ -14,20 +14,16 @@ page, live view, map, and a setup guide for new operators are public.
 
 - Brew protocol server for BlueStation TMO-sites and hotspots (binary WebSocket)
 - Server-to-server federation with mesh relay, TTL, deduplication, path tracking
-- RadioID auto-auth — any licensed amateur on [radioid.net](https://radioid.net)
-  is accepted automatically, no manual allow-list
-- LIP position decoding → APRS-IS forwarding
 - Coverage database with H3 hex aggregation (street/city/region zoom)
 - Last-Heard live view, coverage map, operator dashboard
 - DE/EN i18n on all public pages
-- Optional DMR/BrandMeister bridge (separate `tetra-brew-dmrbridge` process)
 
 ## Requirements
 
 - BlueStation TMO-site or hotspot — see
   [MidnightBlueLabs/tetra-bluestation](https://github.com/MidnightBlueLabs/tetra-bluestation)
-- Linux server with public IP (VPS, home server with port forwarding, or HamNet node)
-- Go 1.24+ for building, or pre-built binary from releases
+- Linux server with public IP (VPS, home server with port forwarding)
+- Go 1.25+ for building, or pre-built binary from releases
 - TLS reverse proxy in front (nginx + Letsencrypt, recommended)
 
 ## Quick start
@@ -67,16 +63,15 @@ If you only want one service-specific override, set just that variable.
 
 ## BlueStation configuration
 
-Point your BS at the server. Any valid DMR/TETRA ID registered on
-[radioid.net](https://radioid.net) is accepted automatically.
+Point your BlueStation at the server:
 
 ```toml
 [brew]
 host = "your-freetetra-server.tld"
 port = 443
 tls = true
-username = YOUR_ISSI            # = DMR-ID + 2-digit SSID, e.g. 262356300
-password = "blafablafa"         # shared key for all RadioID users
+username = YOUR_ISSI
+password = "your-shared-key"
 ```
 
 The rest of the BlueStation config (SDR frequencies, `[net_info]`, `[cell_info]`)
@@ -89,9 +84,8 @@ TG 1-9      Local       — stays on this server, never federated
                           By convention: TG 7-9 for service bots (echo, weather)
                           Each server operator runs their own.
 TG 10-90    FreeTetra   — federated to all FreeTetra servers worldwide
-TG 91+      BrandMeister — federated PLUS bridged to DMR/BrandMeister on
-                          servers that run the dmrbridge. TG numbers map 1:1
-                          (e.g. TG 262 = Germany, TG 2621 = DL Cluster Nord).
+TG 91+      Bridges     — federated, optionally bridged to external networks
+                          (e.g. DMR/BrandMeister) on servers that run a bridge.
 ```
 
 Enforced in code (`internal/federation/hub.go::isFederatedGSSI`). Local GSSIs
@@ -103,7 +97,7 @@ FreeTetra is an **open federation** with a **symmetric shared key**:
 
 ```env
 FEDERATION_ENABLED=true
-FEDERATION_NAME=YOUR_CALLSIGN
+FEDERATION_NAME=YOUR_SERVER_NAME
 FEDERATION_KEY=freetetra-federation-2026
 FEDERATION_SELF_URL=free.tetra.cat:8102
 FEDERATION_PEERS=free2.tetra.cat:8202
@@ -137,7 +131,7 @@ just pick your own `FEDERATION_KEY` and share it only with your own peers.
 | LIP position samples | `MsgPositionSample` — every server's coverage map shows the whole network |
 | BlueStation heartbeats | `MsgStationUpdate` — station list is consistent across servers |
 | Peer gossip | `MsgPeerExchange` — discover new peers via known peers |
-| RadioID users.txt | `MsgUsersDBOffer`/`MsgUsersDBRequest` — offline peers can sync the user DB from connected peers |
+| Subscriber database | `MsgUsersDBOffer`/`MsgUsersDBRequest` — offline peers can sync from connected peers |
 
 ### Resilience
 
@@ -147,52 +141,12 @@ just pick your own `FEDERATION_KEY` and share it only with your own peers.
 - Auto-reconnect on TCP drop (10s delay)
 - Self-connect protection: gossip filters our own URL/name out
 
-## RadioID auto-auth
-
-Connection is accepted if the username (ISSI) is a licensed amateur on
-[radioid.net](https://radioid.net). No account creation, no manual allow-list.
-
-```env
-RADIOID_AUTH_ENABLED=true
-RADIOID_SHARED_KEY=blafablafa
-RADIOID_SYNC_ON_START=true
-RADIOID_SYNC_EVERY=24h
-```
-
-The full users database (~260k entries) is cached locally as `users.txt` and
-refreshed periodically. For HamNet or other offline deployments:
-
-```env
-RADIOID_OFFLINE_MODE=true
-```
-
-Peers without internet automatically download the DB from connected peers that
-have it. One internet-connected seed is enough for a whole HamNet cluster.
-
-Manual bans (localhost only, via SSH):
-
-```
-GET /api/radioid/block?issi=XXX&action=block
-```
-
-## APRS-IS
-
-LIP position reports (SDS Type4) are decoded and forwarded to APRS-IS.
-Callsign is looked up via RadioID (ISSI → callsign).
-
-```env
-APRS_ENABLED=true
-APRS_CALLSIGN=YOUR_CALLSIGN
-APRS_PASSCODE=CALCULATED_PASSCODE
-APRS_SERVER=euro.aprs2.net:14580
-```
-
 ## Operator info
 
 Each server can advertise its operator info on the landing page:
 
 ```env
-OPERATOR_NAME=YOUR_CALLSIGN
+OPERATOR_NAME=YOUR_SERVER_NAME
 OPERATOR_CONTACT=you@example.com
 OPERATOR_DESCRIPTION=Short text about who runs this server and for whom.
 ```
@@ -214,29 +168,21 @@ GET  /api/map?res=N&days=N  coverage hexes (resolution 5/7/9, time-decay)
 GET  /api/stations          known BlueStations (federated)
 GET  /api/telemetry/clients connected BlueStations
 GET  /api/peers             connected federation peers
-GET  /api/users.txt         local RadioID database (for peer sync)
 GET  /lang/{de|en}          set language cookie + redirect to referer
 ```
 
 Authenticated (by protocol):
 
 ```
-GET  /brew/                 BlueStation discovery (HTTP Digest + RadioID)
-WS   /                      telemetry (HTTP Basic + RadioID)
-WS   /peer/                 federation peer (shared key via X-Brew-Key header)
-```
-
-Localhost only (admin actions):
-
-```
-GET  /api/radioid/block     ban/unban an ISSI
-GET  /api/radioid/users     list cached users
+GET  /brew/                 BlueStation discovery (HTTP Digest)
+WS   /                      telemetry (HTTP Basic)
+                            federation peers via gRPC on FEDERATION_RPC_LISTEN_ADDR
 ```
 
 ## Service bots (optional)
 
-Echo, webradio, and DMR-bridge are separate Brew-client processes, not part of
-the core server. Run them alongside the server if needed.
+Echo, webradio, and bridge components are separate Brew-client processes, not
+part of the core server. Run them alongside the server if needed.
 
 ```bash
 ./tetra-brew-echo         # echo/parrot service (set ECHO_TALKGROUP)
@@ -258,6 +204,20 @@ websocket connection.
 By convention service bots should run on local TGs (1-9) so they don't
 create federation ping-pong with other servers running similar bots.
 
+### DMR bridge gating
+
+`tetra-brew-dmrbridge` only forwards calls into DMR/BrandMeister when the
+source ISSI exists in the local RadioID `users.txt` (BM-side licensing
+constraint). Calls without a valid DMR ID still federate normally inside
+FreeTetra — they just can't push into BM. Reverse direction (BM → FT) is
+ungated; BM only emits valid DMR IDs to begin with.
+
+Disable the gate (everyone may TX to BM):
+
+```env
+DMRBRIDGE_REQUIRE_RADIOID=false
+```
+
 ## Build
 
 ACELP codec is included under `codec/`. No external downloads.
@@ -270,7 +230,7 @@ go build ./cmd/tetra-brew-dmrbridge
 go build ./cmd/tetra-brew-proxy
 
 # ACELP encoder for webradio
-gcc -Icodec/ -Ofast codec/encoder_stdio.c codec/codec/*.c -o tetra-acelp-stdio
+gcc -Icodec/ -Ofast codec/encoder_stdio.c codec/tetra-codec.c codec/tetra-codec-impl.c -o tetra-acelp-stdio
 ```
 
 CGO is required (h3-go uber/h3-go uses libh3). On macOS:
@@ -333,8 +293,8 @@ Run alongside FreeTetra (typically on the Pi next to a BlueStation):
 
 | Repo | Purpose |
 |---|---|
-| [`freetetra-agent`](https://github.com/dirkforpresident/freetetra-agent) | Station registration daemon. Small PIN-protected web UI to declare callsign, position, frequencies. Pushes to `/api/stations/push`. |
-| [`freetetra-lip-aprs`](https://github.com/dirkforpresident/freetetra-lip-aprs) | LIP → APRS bridge. Reads BlueStation journal, extracts individual LIP position SDS (e.g. on TG 262999), pushes to the server which forwards to APRS-IS. |
+| [`freetetra-agent`](https://github.com/dirkforpresident/freetetra-agent) | Station registration daemon. Small PIN-protected web UI to declare name, position, frequencies. Pushes to `/api/stations/push`. |
+| [`freetetra-lip-aprs`](https://github.com/dirkforpresident/freetetra-lip-aprs) | Optional LIP → APRS bridge. Reads BlueStation journal, extracts individual LIP position SDS, pushes to the server which can forward to APRS-IS if configured. |
 
 ## Contributing
 
@@ -346,7 +306,7 @@ GPLv3.
 
 ## Credits
 
-- `tetra-brew-mockup` by cheetah — initial Brew protocol implementation
+- `tetra-brew-mockup` by cheetah — initial Brew protocol implementation, gRPC federation transport
 - `tetra-acelp` by ElijahHamilton (based on outerplane/tetra-codec) — ACELP codec
 - `tetra-bluestation` by MidnightBlueLabs — TETRA base station (Apache 2.0)
-- Federation, mesh, RadioID, APRS, coverage, telemetry, web UI, i18n, docs: DO1XX
+- Federation, mesh, coverage, telemetry, web UI, i18n, docs: DO1XX
