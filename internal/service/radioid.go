@@ -107,6 +107,12 @@ func (r *RadioIDAuth) DownloadFromURL(url string) error {
 	return nil
 }
 
+// NewRadioIDAuth returns a configured RadioIDAuth. Exported wrapper around
+// newRadioIDAuth for use by sibling binaries (e.g. dmrbridge gate).
+func NewRadioIDAuth(logger *log.Logger, offline bool, localFile string) *RadioIDAuth {
+	return newRadioIDAuth(logger, offline, localFile)
+}
+
 func newRadioIDAuth(logger *log.Logger, offline bool, localFile string) *RadioIDAuth {
 	if localFile == "" {
 		localFile = "users.txt"
