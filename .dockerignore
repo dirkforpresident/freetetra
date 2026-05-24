@@ -3,3 +3,9 @@ main
 *.log
 *.tmp
 .DS_Store
+
+# Local Vue build artifacts — the Dockerfile rebuilds these in its
+# webbuild stage from a clean tree.
+web/node_modules
+web/dist
+web/.vite

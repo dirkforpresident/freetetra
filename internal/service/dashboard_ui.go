@@ -83,10 +83,9 @@ type uiVirtualSDSEndpointRequest struct {
 }
 
 func (s *Service) registerDashboardHandlers() {
-	// New FreeTetra admin dashboard (replaces cheetah's Vuetify UI)
-	s.server.RegisterHTTPHandler("/ui", s.handleAdminDashboard)
-	s.server.RegisterHTTPHandler("/ui/", s.handleAdminDashboard)
-	// Keep old Vuetify dashboard at /ui/legacy for reference
+	// /ui (admin dashboard) is served by the Vue SPA via registerSPAFallback.
+	// /ui/legacy still serves the inline Vuetify SDS console; that port is
+	// scheduled for a follow-up PR.
 	s.server.RegisterHTTPHandler("/ui/legacy", s.handleDashboardUI)
 	// API endpoints
 	s.server.RegisterHTTPHandler("/api/dashboard/snapshot", s.handleDashboardSnapshot)

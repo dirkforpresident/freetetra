@@ -14,6 +14,11 @@ type Config struct {
 	UserAgent      string
 	ReconnectDelay time.Duration
 
+	// WebRoot points the Go server at a built Vue SPA on disk so it can
+	// serve / when the binary is not built with -tags web_embed. Ignored
+	// in embed builds, where the SPA is baked into the binary.
+	WebRoot string
+
 	Server     ServerConfig
 	Client     BrewClientConfig
 	MQTT       MQTTConfig
@@ -21,6 +26,7 @@ type Config struct {
 	WebRadio   WebRadioConfig
 	Zello      ZelloConfig
 	Echo       EchoConfig
+	Proxy      ProxyConfig
 	RadioID    RadioIDConfig
 	APRS       APRSConfig
 	MOTD       MOTDConfig
@@ -191,6 +197,14 @@ type EchoConfig struct {
 	MaxFrames     int
 }
 
+type ProxyConfig struct {
+	BridgeISSI    uint32
+	TargetISSI    uint32
+	DialTimeout   time.Duration
+	IdleTimeout   time.Duration
+	MaxConcurrent int
+}
+
 func LoadFromEnv() (Config, error) {
 	_ = loadDotEnv(".env")
 
@@ -199,6 +213,7 @@ func LoadFromEnv() (Config, error) {
 		HTTPListenAddr: env("HTTP_LISTEN_ADDR", ":8080"),
 		UserAgent:      env("USER_AGENT", "tetra-brew-backend/0.1"),
 		ReconnectDelay: envDuration("RECONNECT_DELAY", 2*time.Second),
+		WebRoot:        env("WEB_ROOT", ""),
 		Server: ServerConfig{
 			Path:         normalizePath(env("BREW_SERVER_PATH", "/brew")),
 			Realm:        env("BREW_SERVER_REALM", "TETRA Homebrew"),
@@ -356,10 +371,17 @@ func LoadFromEnv() (Config, error) {
 			ReleaseCause:  uint8(envInt("ECHO_RELEASE_CAUSE", 0)),
 			MaxFrames:     envInt("ECHO_MAX_FRAMES", 2000),
 		},
+		Proxy: ProxyConfig{
+			BridgeISSI:    uint32(envInt("PROXY_BRIDGE_ISSI", 0)),
+			TargetISSI:    uint32(envInt("PROXY_TARGET_ISSI", 0)),
+			DialTimeout:   envDuration("PROXY_DIAL_TIMEOUT", 10*time.Second),
+			IdleTimeout:   envDuration("PROXY_IDLE_TIMEOUT", 60*time.Second),
+			MaxConcurrent: envInt("PROXY_MAX_CONCURRENT", 4),
+		},
 	}
 
 	switch cfg.BrewMode {
-	case "server", "hybrid", "client", "router", "webradio", "zello", "echo", "dmrbridge":
+	case "server", "hybrid", "client", "router", "webradio", "zello", "echo", "dmrbridge", "proxy":
 	default:
 		return cfg, fmt.Errorf("invalid BREW_MODE=%q", cfg.BrewMode)
 	}

@@ -10,7 +10,7 @@ Open an issue on GitHub with:
 - What you expected
 - What actually happened
 - Relevant logs (`journalctl -u freetetra` or stdout output)
-- Your setup (server, BlueStation, hotspot/repeater, FreeTetra version /
+- Your setup (server, BlueStation, hotspot/TMO-site, FreeTetra version /
   commit hash)
 
 For security issues, please email do1xx@pm.me directly instead of opening

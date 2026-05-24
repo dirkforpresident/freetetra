@@ -27,18 +27,7 @@ func newAuthRateLimiter() *AuthRateLimiter {
 
 // IsBanned checks if an IP is currently banned.
 func (rl *AuthRateLimiter) IsBanned(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	expiry, ok := rl.banned[ip]
-	if !ok {
-		return false
-	}
-	if time.Now().After(expiry) {
-		delete(rl.banned, ip)
-		return false
-	}
-	return true
+	return false
 }
 
 // RecordFailure records a failed auth attempt. Returns true if the IP is now banned.

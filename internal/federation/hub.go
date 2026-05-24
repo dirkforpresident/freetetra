@@ -733,7 +733,7 @@ func (h *Hub) handleSdsRelay(peer *Peer, ctrl *federationv2pb.Control, sr *feder
 
 func (h *Hub) handlePositionSample(peer *Peer, ctrl *federationv2pb.Control, ps *federationv2pb.PositionSample) {
 	if h.handler != nil {
-		h.handler.OnPeerPositionSample(peer.Name, ps.GetIssi(), ps.GetLat(), ps.GetLon(), ps.GetRepeater())
+		h.handler.OnPeerPositionSample(peer.Name, ps.GetIssi(), ps.GetLat(), ps.GetLon(), ps.GetTmoSite())
 	}
 	if h.mesh.ShouldRelay(ctrl) {
 		h.relayToPeers(h.mesh.PrepareRelay(ctrl), peer.Name)
@@ -889,7 +889,7 @@ func (h *Hub) BroadcastStation(station map[string]any) {
 
 // BroadcastPositionSample sendet einen empfangenen Position-Sample an alle Peers
 // (Coverage-Federation). Mesh-Router dedupliziert + relayed.
-func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, repeater string) {
+func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, tmoSite string) {
 	ctrl := &federationv2pb.Control{
 		Origin: h.serverName,
 		Payload: &federationv2pb.Control_PositionSample{
@@ -897,7 +897,7 @@ func (h *Hub) BroadcastPositionSample(issi uint32, lat, lon float64, repeater st
 				Issi:     issi,
 				Lat:      lat,
 				Lon:      lon,
-				Repeater: repeater,
+				TmoSite:  tmoSite,
 			},
 		},
 	}
@@ -1236,4 +1236,38 @@ func (h *Hub) relayToPeers(ctrl *federationv2pb.Control, excludeName string) {
 			_ = peer.SendControl(ctrl)
 		}
 	}
+}
+
+// =============================================================================
+// TODO: private call routing stubs.
+//
+// federation_bridge.go (from feat/federation-duplex-proxy, now on master) calls
+// these three Route* methods. They were implemented on top of the JSON-Message
+// world in feat/federation-pr / feat/federation-duplex-proxy. This branch's
+// typed-protobuf refactor predates that work, so the methods need to be
+// reimplemented on top of the typed-protobuf core. See PR #5
+// (feat/federation-protobuf-fixes) for the rest of the federation-pr fixes
+// ported onto this branch.
+//
+// These stubs let the merged tree compile. They MUST be reimplemented before
+// federation is treated as production-ready — federation will otherwise
+// silently drop private calls.
+
+func (h *Hub) RouteCallStartToPeerForISSI(callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16) (string, bool) {
+	_ = callUUID
+	_ = sourceISSI
+	_ = destISSI
+	_ = priority
+	_ = service
+	return "", false
+}
+
+func (h *Hub) RouteCallEndForCall(callUUID string, cause uint8) {
+	_ = callUUID
+	_ = cause
+}
+
+func (h *Hub) RouteVoiceFrameForCall(callUUID string, frameData []byte) {
+	_ = callUUID
+	_ = frameData
 }

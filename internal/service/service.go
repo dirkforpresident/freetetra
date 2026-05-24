@@ -50,7 +50,7 @@ type Service struct {
 	aprsBridge    *APRSBridge
 	radioIDAuth   *RadioIDAuth
 	rateLimiter   *AuthRateLimiter
-	repeaters     *RepeaterHeartbeat
+	tmoSites      *TMOSiteHeartbeat
 	telemetry     *TelemetryServer
 	coverageDB    *CoverageDB
 	stationStore  *stationStore
@@ -157,18 +157,18 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 		logger.Printf("RadioID: auto-auth enabled (shared key configured)")
 	}
 
-	s.repeaters = newRepeaterHeartbeat()
+	s.tmoSites = newTMOSiteHeartbeat()
 	s.stationStore = newStationStore(logger)
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.registerPublicHandlers()
 	s.registerRadioIDHandlers()
-	s.registerRepeaterHandlers()
+	s.registerTMOSiteHandlers()
 	s.registerTelemetryServer()
 	s.registerStationHandlers()
 	s.registerLiveHandlers()
-	s.registerMitmachenHandlers()
-	s.registerLangHandlers()
+	s.registerSiteConfigHandlers()
+	s.registerSPAFallback()
 	s.initBuiltInVirtualSDSRoutes()
 
 	if cfg.APRS.Enabled && cfg.APRS.Callsign != "" {
@@ -411,7 +411,11 @@ func (s *Service) onCallControlFromClient(client *brew.Client, m *brew.CallContr
 			s.lastHeard.Start(m.Identifier, trackSource, trackDest, "subscriber")
 		}
 		if s.federation != nil {
-			s.federation.NotifyCallStart(m.Identifier.String(), trackSource, trackDest, 0, 0)
+			if destinationType == destinationTypeSubscriber {
+				s.federation.NotifyPrivateCallStart(m.Identifier.String(), trackSource, trackDest, 0, 0)
+			} else {
+				s.federation.NotifyCallStart(m.Identifier.String(), trackSource, trackDest, 0, 0)
+			}
 		}
 	}
 
@@ -512,10 +516,13 @@ func (s *Service) onVoiceFrameFromClient(client *brew.Client, m *brew.FrameMessa
 					call.DestinationGSI,
 				)
 			}
+			if s.federation != nil {
+				s.federation.NotifyVoiceFrame(m.Identifier.String(), m.Data)
+			}
 			return
 		}
 		_ = s.broadcastByDestinationType(call.DestinationType, call.DestinationGSI, wire, client.ID)
-		if s.federation != nil && call.DestinationType == destinationTypeGroup {
+		if s.federation != nil {
 			s.federation.NotifyVoiceFrame(m.Identifier.String(), m.Data)
 		}
 		return
