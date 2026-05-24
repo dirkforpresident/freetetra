@@ -258,16 +258,16 @@ func (fb *federationBridge) OnPeerStationUpdate(peerName string, stationMap map[
 // OnPeerPositionSample wird vom Federation-Hub aufgerufen, wenn ein Peer
 // einen Position-Sample meldet (Coverage-Federation). Wir speichern den
 // Sample in der lokalen Coverage-DB damit unsere Map die Gesamt-Welt zeigt.
-func (fb *federationBridge) OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string) {
+func (fb *federationBridge) OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, tmoSite string) {
 	if fb.svc.coverageDB == nil {
 		return
 	}
-	// Repeater-Tag = der Server-Name der den Sample empfangen hat. Wenn der
-	// Origin-Repeater leer war, fallback auf peer-Name.
-	if repeater == "" {
-		repeater = peerName
+	// TMO-Site-Tag = der Server-Name der den Sample empfangen hat. Wenn der
+	// Origin-Tag leer war, fallback auf peer-Name.
+	if tmoSite == "" {
+		tmoSite = peerName
 	}
-	_ = fb.svc.coverageDB.Insert(issi, lat, lon, nil, nil, repeater)
+	_ = fb.svc.coverageDB.Insert(issi, lat, lon, nil, nil, tmoSite)
 	if fb.svc.positionStore != nil {
 		fb.svc.positionStore.Update(issi, lat, lon)
 	}
@@ -334,11 +334,11 @@ func (fb *federationBridge) NotifySubscriberUpdate(issi uint32, action string, g
 
 // NotifyPositionSample sendet einen empfangenen LIP-Sample (lat/lon) an alle
 // Federation-Peers — fuer geteilte Coverage-Map.
-func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, repeater string) {
+func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, tmoSite string) {
 	if fb.hub == nil {
 		return
 	}
-	fb.hub.BroadcastPositionSample(issi, lat, lon, repeater)
+	fb.hub.BroadcastPositionSample(issi, lat, lon, tmoSite)
 }
 
 // NotifyStationUpdate broadcasted einen BlueStation-Heartbeat an alle Peers.

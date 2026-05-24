@@ -22,3 +22,8 @@ announce_*.bin
 .vscode/
 *.swp
 .tools/
+
+# Web frontend (see web/.gitignore for fine-grained rules)
+web/node_modules/
+web/dist/
+web/.vite/

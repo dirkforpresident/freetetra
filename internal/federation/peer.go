@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 
 	federationv2pb "github.com/freetetra/server/internal/federation/proto/v2"
 )
@@ -31,6 +32,39 @@ type Peer struct {
 	// status code travels back to the dialer. nil means normal close.
 	closeErrMu sync.Mutex
 	closeErr   error
+
+	// Per-peer send statistics. Tracked with atomics so any goroutine
+	// (writeLoop, broadcast fan-out callers, the stats logger) can read
+	// them without taking a lock.
+	sentControl    atomic.Uint64
+	sentVoice      atomic.Uint64
+	droppedControl atomic.Uint64
+	droppedVoice   atomic.Uint64
+}
+
+// PeerBufferStats is a snapshot of a peer's send-channel occupancy and
+// lifetime counters. QueueLen and QueueCap reflect the Go-channel side
+// (256 slots by default); the gRPC HTTP/2 flow-control window is a
+// separate buffer the channel feeds into and isn't visible from here.
+type PeerBufferStats struct {
+	QueueLen       int    `json:"queue_len"`
+	QueueCap       int    `json:"queue_cap"`
+	SentControl    uint64 `json:"sent_control"`
+	SentVoice      uint64 `json:"sent_voice"`
+	DroppedControl uint64 `json:"dropped_control"`
+	DroppedVoice   uint64 `json:"dropped_voice"`
+}
+
+// BufferStats returns the current send-side telemetry for this peer.
+func (p *Peer) BufferStats() PeerBufferStats {
+	return PeerBufferStats{
+		QueueLen:       len(p.send),
+		QueueCap:       cap(p.send),
+		SentControl:    p.sentControl.Load(),
+		SentVoice:      p.sentVoice.Load(),
+		DroppedControl: p.droppedControl.Load(),
+		DroppedVoice:   p.droppedVoice.Load(),
+	}
 }
 
 type rpcStream interface {
@@ -124,7 +158,9 @@ func (p *Peer) SendControl(ctrl *federationv2pb.Control) error {
 	case <-p.done:
 		return context.Canceled
 	default:
-		p.logger.Printf("federation: send buffer full for peer %s, dropping control %s", p.Name, controlPayloadKind(ctrl))
+		dropped := p.droppedControl.Add(1)
+		p.logger.Printf("federation: send buffer full for peer %s [q=%d/%d sent=%d dropped=%d], dropping control %s",
+			p.Name, len(p.send), cap(p.send), p.sentControl.Load(), dropped, controlPayloadKind(ctrl))
 		return nil
 	}
 }
@@ -133,6 +169,8 @@ func (p *Peer) SendControl(ctrl *federationv2pb.Control) error {
 // SendVoiceFrame sends a typed v2 voice frame to the peer. Drops silently
 // on a full buffer rather than logging — voice is high-frequency (3-4
 // frames per second per active call) and a log per drop would flood.
+// The drop is still counted on droppedVoice so the periodic stats log
+// surfaces sustained loss.
 func (p *Peer) SendVoiceFrame(callUUID string, frameData []byte) error {
 	frame := &federationv2pb.StreamFrame{
 		Body: &federationv2pb.StreamFrame_VoiceFrame{VoiceFrame: &federationv2pb.VoiceFrame{
@@ -146,6 +184,7 @@ func (p *Peer) SendVoiceFrame(callUUID string, frameData []byte) error {
 	case <-p.done:
 		return context.Canceled
 	default:
+		p.droppedVoice.Add(1)
 		return nil
 	}
 }
@@ -280,6 +319,11 @@ func (p *Peer) writeLoop() {
 			if err := p.stream.Send(env); err != nil {
 				p.logger.Printf("federation: write to %s failed: %v", p.Name, err)
 				return
+			}
+			if env.GetVoiceFrame() != nil {
+				p.sentVoice.Add(1)
+			} else {
+				p.sentControl.Add(1)
 			}
 
 		case <-p.done:

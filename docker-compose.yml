@@ -1,6 +1,7 @@
 services:
   freetetra:
     build: .
+    image: freetetra:latest
     container_name: freetetra
     env_file:
       - ${ENV_COMMON_FILE:-.env}
@@ -14,6 +15,7 @@ services:
 
   webradio:
     build: .  
+    image: freetetra:latest
     container_name: freetetra-webradio
     entrypoint: ["/app/tetra-brew-webradio"]
     env_file:
@@ -36,6 +38,7 @@ services:
 
   echo:
     build: .
+    image: freetetra:latest
     container_name: freetetra-echo
     entrypoint: ["/app/tetra-brew-echo"]
     env_file:

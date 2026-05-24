@@ -12,7 +12,7 @@ page, live view, map, and a setup guide for new operators are public.
 
 ## What it does
 
-- Brew protocol server for BlueStation repeaters and hotspots (binary WebSocket)
+- Brew protocol server for BlueStation TMO-sites and hotspots (binary WebSocket)
 - Server-to-server federation with mesh relay, TTL, deduplication, path tracking
 - Coverage database with H3 hex aggregation (street/city/region zoom)
 - Last-Heard live view, coverage map, operator dashboard
@@ -20,7 +20,7 @@ page, live view, map, and a setup guide for new operators are public.
 
 ## Requirements
 
-- BlueStation repeater or hotspot — see
+- BlueStation TMO-site or hotspot — see
   [MidnightBlueLabs/tetra-bluestation](https://github.com/MidnightBlueLabs/tetra-bluestation)
 - Linux server with public IP (VPS, home server with port forwarding)
 - Go 1.25+ for building, or pre-built binary from releases
