@@ -182,6 +182,10 @@ type WebRadioConfig struct {
 	LoudnormI    float64 // integrated loudness target LUFS; default -16
 	LoudnormTP   float64 // true-peak ceiling dBTP; default -1.5
 	LoudnormLRA  float64 // loudness range LU; default 11
+
+	// LimiterDBFS sets a soft brickwall just before the encoder. Negative
+	// → ceiling in dBFS (e.g. -0.5 ≈ 0.944 linear). Zero/positive disables.
+	LimiterDBFS float64
 }
 
 type ZelloConfig struct {
@@ -308,6 +312,7 @@ func LoadFromEnv() (Config, error) {
 			LoudnormI:        envFloat("WEBRADIO_LOUDNORM_I", -16),
 			LoudnormTP:       envFloat("WEBRADIO_LOUDNORM_TP", -1.5),
 			LoudnormLRA:      envFloat("WEBRADIO_LOUDNORM_LRA", 11),
+			LimiterDBFS:      envFloat("WEBRADIO_LIMITER_DBFS", 0),
 		},
 		Zello: ZelloConfig{
 			Enabled:          envBool("ZELLO_ENABLED", false),

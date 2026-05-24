@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/freetetra/server/internal/config"
@@ -47,6 +48,13 @@ func BuildWebRadioFilterChain(cfg config.WebRadioConfig) string {
 	fc.add(cfg.ExtraFilters)
 	if r := strings.TrimSpace(cfg.Resampler); r != "" {
 		fc.add(fmt.Sprintf("aresample=resampler=%s", r))
+	}
+	// Limiter is the very last stage so it catches anything the resampler
+	// pushes back above the codec's safe input range. dBFS → linear via
+	// the standard 20·log10 conversion.
+	if cfg.LimiterDBFS < 0 {
+		lin := math.Pow(10, cfg.LimiterDBFS/20.0)
+		fc.add(fmt.Sprintf("alimiter=level_in=1:level_out=1:limit=%.6f", lin))
 	}
 	return fc.String()
 }

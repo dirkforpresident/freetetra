@@ -129,6 +129,28 @@ func TestBuildWebRadioFilterChain_LoudnormPositionBeforeHPF(t *testing.T) {
 	}
 }
 
+func TestBuildWebRadioFilterChain_LimiterIsLast(t *testing.T) {
+	cfg := config.WebRadioConfig{
+		VolumeDB:     -14,
+		Resampler:    "soxr",
+		LimiterDBFS:  -0.5,
+	}
+	got := BuildWebRadioFilterChain(cfg)
+	// 10^(-0.5/20) ≈ 0.944061
+	want := "volume=-14dB,aresample=resampler=soxr,alimiter=level_in=1:level_out=1:limit=0.944061"
+	if got != want {
+		t.Errorf("limiter chain mismatch:\n got = %q\nwant = %q", got, want)
+	}
+}
+
+func TestBuildWebRadioFilterChain_LimiterDisabledAtZero(t *testing.T) {
+	cfg := config.WebRadioConfig{VolumeDB: -10, LimiterDBFS: 0}
+	got := BuildWebRadioFilterChain(cfg)
+	if got != "volume=-10dB" {
+		t.Errorf("zero/positive LimiterDBFS must disable alimiter; got %q", got)
+	}
+}
+
 func TestBuildWebRadioFilterChain_HPFLPFInsertedBetweenCompressorAndExtra(t *testing.T) {
 	// HPF/LPF must sit between dynamics and any user-supplied tail so that
 	// codec-bound band-limiting is the operator's last *implicit* step
