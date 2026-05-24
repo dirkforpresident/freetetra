@@ -59,6 +59,10 @@ type CallHandler interface {
 	OnPeerCallStart(peerName string, callUUID string, sourceISSI, destGSSI uint32, priority uint8, service uint16)
 	OnPeerPrivateCallStart(peerName string, callUUID string, sourceISSI, destISSI uint32, priority uint8, service uint16)
 	OnPeerCallEnd(peerName string, callUUID string, cause uint8)
+	// OnPeerCallReply receives post-CallStart, pre-CallEnd signaling
+	// (brew SetupAccept=5, SetupReject=6, ConnectRequest=8) routed across
+	// the federation back to the originating side of a private call.
+	OnPeerCallReply(peerName string, callUUID string, state, cause uint8)
 	OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte)
 	OnPeerSDSRelay(peerName string, sourceISSI, destISSI uint32, sdsDataHex string)
 	OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string)
@@ -572,6 +576,8 @@ func (h *Hub) handleControlMessage(peer *Peer, ctrl *federationv2pb.Control) {
 		h.handlePositionSample(peer, ctrl, p.PositionSample)
 	case *federationv2pb.Control_StationUpdate:
 		h.handleStationUpdate(peer, ctrl, p.StationUpdate)
+	case *federationv2pb.Control_CallReply:
+		h.handleCallReply(peer, ctrl, p.CallReply)
 	}
 }
 
@@ -863,6 +869,17 @@ func (h *Hub) handleCallEnd(peer *Peer, ctrl *federationv2pb.Control, ce *federa
 		}
 		seen[p.Name] = true
 		_ = p.SendControl(relay)
+	}
+}
+
+// handleCallReply receives SetupAccept / SetupReject / ConnectRequest routed
+// across the federation from the answerer's side of a private call. The
+// handler (federation_bridge) re-injects the appropriate brew
+// CallControlMessage to local clients tracking the call. Point-to-point —
+// no further relay.
+func (h *Hub) handleCallReply(peer *Peer, _ *federationv2pb.Control, cr *federationv2pb.CallReply) {
+	if h.handler != nil {
+		h.handler.OnPeerCallReply(peer.Name, cr.GetUuid(), uint8(cr.GetState()), uint8(cr.GetCause()))
 	}
 }
 
@@ -1596,4 +1613,40 @@ func (h *Hub) RouteCallEndForCall(callUUID string, cause uint8) {
 	}
 	h.mesh.PrepareOutgoing(ctrl)
 	_ = peer.SendControl(ctrl)
+}
+
+// RouteCallReplyForCall forwards a post-CallStart, pre-CallEnd signaling
+// reply (SetupAccept / SetupReject / ConnectRequest, as brew CallState
+// codes 5/6/8) to the single peer that owns the private call. Looks up
+// the peer via privateCalls; returns false if the call isn't tracked as
+// private (the caller falls back to whatever non-federation routing it
+// would use for a group call).
+func (h *Hub) RouteCallReplyForCall(callUUID string, state, cause uint8) bool {
+	h.callMu.RLock()
+	peerName, ok := h.privateCalls[callUUID]
+	h.callMu.RUnlock()
+	if !ok {
+		return false
+	}
+	h.mu.RLock()
+	peer := h.peers[peerName]
+	if peer == nil {
+		peer = h.peers[peerName+":in"]
+	}
+	h.mu.RUnlock()
+	if peer == nil {
+		return false
+	}
+	ctrl := &federationv2pb.Control{
+		Origin: h.serverName,
+		Payload: &federationv2pb.Control_CallReply{
+			CallReply: &federationv2pb.CallReply{
+				Uuid:  callUUID,
+				State: uint32(state),
+				Cause: uint32(cause),
+			},
+		},
+	}
+	h.mesh.PrepareOutgoing(ctrl)
+	return peer.SendControl(ctrl) == nil
 }

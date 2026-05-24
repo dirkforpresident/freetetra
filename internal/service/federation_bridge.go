@@ -267,6 +267,64 @@ func (fb *federationBridge) OnPeerCallEnd(peerName string, callUUID string, caus
 	}
 }
 
+// OnPeerCallReply receives federation-routed SetupAccept / SetupReject /
+// ConnectRequest for a private call we originated. It rebuilds the matching
+// brew CallControlMessage and broadcasts it to local clients tracking the
+// call so the originating brew client (e.g. the proxy bridge daemon) sees
+// the same state transition it would for a non-federated call.
+//
+// Without this path, ConnectRequest from the answering BS only reaches the
+// answerer's federation node and is silently dropped — the originating
+// proxy never learns the target picked up, so it can't send its outbound
+// ConnectRequest and the call times out at the BS.
+func (fb *federationBridge) OnPeerCallReply(peerName string, callUUID string, state, cause uint8) {
+	uid, err := uuid.Parse(callUUID)
+	if err != nil {
+		fb.logger.Printf("federation: invalid call-reply UUID from %s: %s", peerName, callUUID)
+		return
+	}
+
+	fb.svc.callMu.RLock()
+	call := fb.svc.calls[uid]
+	fb.svc.callMu.RUnlock()
+	if call == nil {
+		fb.logger.Printf("federation: dropping call-reply from %s for unknown call=%s state=%d", peerName, callUUID, state)
+		return
+	}
+
+	var wire []byte
+	switch state {
+	case brew.CallStateSetupAccept:
+		wire = brew.BuildSetupAccept(uid)
+	case brew.CallStateSetupReject:
+		wire = brew.BuildSetupReject(uid, cause)
+	case brew.CallStateConnectRequest:
+		// Reply ConnectRequest's call payload echoes the original setup
+		// pair so brew clients can match it. The originating client is
+		// the answerer's bridge ISSI — that's call.DestinationGSI in
+		// our tracked state (we stored Source=originator, Dest=target
+		// at SetupRequest time).
+		wire = brew.BuildConnectRequest(uid, brew.CircularCallPayload{
+			Source:      call.DestinationGSI,
+			Destination: call.SourceISSI,
+			Duplex:      1,
+		})
+	default:
+		fb.logger.Printf("federation: unexpected call-reply state=%d from %s call=%s", state, peerName, callUUID)
+		return
+	}
+
+	// Deliver to whichever local clients are tracking either end of the call.
+	// For a private call routed across federation, the originating client
+	// (the bridge) is registered as the SourceISSI of our tracked call.
+	n := fb.svc.server.BroadcastToSubscriber(call.SourceISSI, wire, "")
+	if call.DestinationGSI != 0 && call.DestinationGSI != call.SourceISSI {
+		n += fb.svc.server.BroadcastToSubscriber(call.DestinationGSI, wire, "")
+	}
+	fb.logger.Printf("federation: relayed private REPLY state=%d from %s call=%s -> %d local clients",
+		state, peerName, callUUID, n)
+}
+
 func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, frameData []byte) {
 	uid, err := uuid.Parse(callUUID)
 	if err != nil {
@@ -442,6 +500,40 @@ func (fb *federationBridge) NotifyPrivateCallStart(callUUID string, sourceISSI, 
 		return
 	}
 	fb.logger.Printf("federation: routed private call=%s %d->%d via peer %s", callUUID, sourceISSI, destISSI, peerName)
+}
+
+// NotifyCallReply forwards a SetupAccept / SetupReject / ConnectRequest
+// (brew CallState 5/6/8) to the peer that owns the private call, so the
+// answer/proceeding path flows back to the originating side. Returns
+// true iff the call was tracked as private and a peer was found.
+func (fb *federationBridge) NotifyCallReply(callUUID string, state, cause uint8) bool {
+	if fb.hub == nil {
+		return false
+	}
+	return fb.hub.RouteCallReplyForCall(callUUID, state, cause)
+}
+
+// federationTargetPrefix marks a targetClientID that should be delivered
+// across federation rather than to a local brew client. The resolver
+// (resolveSubscriberCallRoute) emits "federation:<peerName>" when an
+// active private call's origin lives on a remote peer.
+const federationTargetPrefix = "federation:"
+
+func isFederationTarget(targetClientID string) bool {
+	return strings.HasPrefix(targetClientID, federationTargetPrefix)
+}
+
+// isCallReplyState reports whether a brew CallState is one that the
+// federation CallReply message carries back to the call's originating
+// peer (post-CallStart, pre-CallEnd signaling).
+func isCallReplyState(state uint8) bool {
+	switch state {
+	case brew.CallStateSetupAccept,
+		brew.CallStateSetupReject,
+		brew.CallStateConnectRequest:
+		return true
+	}
+	return false
 }
 
 // NotifyCallEnd notifies peers about a local call ending. Private calls go

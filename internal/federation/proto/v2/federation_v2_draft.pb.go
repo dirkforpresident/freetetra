@@ -230,6 +230,7 @@ type Control struct {
 	//	*Control_UsersDbRequest
 	//	*Control_PositionSample
 	//	*Control_StationUpdate
+	//	*Control_CallReply
 	Payload       isControl_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -424,6 +425,15 @@ func (x *Control) GetStationUpdate() *StationUpdate {
 	return nil
 }
 
+func (x *Control) GetCallReply() *CallReply {
+	if x != nil {
+		if x, ok := x.Payload.(*Control_CallReply); ok {
+			return x.CallReply
+		}
+	}
+	return nil
+}
+
 type isControl_Payload interface {
 	isControl_Payload()
 }
@@ -480,6 +490,10 @@ type Control_StationUpdate struct {
 	StationUpdate *StationUpdate `protobuf:"bytes,22,opt,name=station_update,json=stationUpdate,proto3,oneof"`
 }
 
+type Control_CallReply struct {
+	CallReply *CallReply `protobuf:"bytes,23,opt,name=call_reply,json=callReply,proto3,oneof"`
+}
+
 func (*Control_Hello) isControl_Payload() {}
 
 func (*Control_SubscriberUpdate) isControl_Payload() {}
@@ -505,6 +519,8 @@ func (*Control_UsersDbRequest) isControl_Payload() {}
 func (*Control_PositionSample) isControl_Payload() {}
 
 func (*Control_StationUpdate) isControl_Payload() {}
+
+func (*Control_CallReply) isControl_Payload() {}
 
 // Hello carries handshake metadata.
 type Hello struct {
@@ -818,6 +834,72 @@ func (x *CallEnd) GetCause() uint32 {
 	return 0
 }
 
+// CallReply carries the post-CallStart signaling states that aren't a full
+// CallEnd: SetupAccept (state 5), SetupReject (6), and ConnectRequest (8)
+// from the brew protocol. These travel back from the answerer's federation
+// side to the caller's federation side so private/duplex calls can complete
+// across a federation hop. State values are kept aligned with the brew
+// CallState* constants in internal/brew/protocol.go.
+type CallReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Uuid          string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	State         uint32                 `protobuf:"varint,2,opt,name=state,proto3" json:"state,omitempty"`
+	Cause         uint32                 `protobuf:"varint,3,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CallReply) Reset() {
+	*x = CallReply{}
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CallReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CallReply) ProtoMessage() {}
+
+func (x *CallReply) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CallReply.ProtoReflect.Descriptor instead.
+func (*CallReply) Descriptor() ([]byte, []int) {
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CallReply) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *CallReply) GetState() uint32 {
+	if x != nil {
+		return x.State
+	}
+	return 0
+}
+
+func (x *CallReply) GetCause() uint32 {
+	if x != nil {
+		return x.Cause
+	}
+	return 0
+}
+
 type VoiceFrame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// UUID string form for 1:1 compatibility with existing code path.
@@ -829,7 +911,7 @@ type VoiceFrame struct {
 
 func (x *VoiceFrame) Reset() {
 	*x = VoiceFrame{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[7]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -841,7 +923,7 @@ func (x *VoiceFrame) String() string {
 func (*VoiceFrame) ProtoMessage() {}
 
 func (x *VoiceFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[7]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -854,7 +936,7 @@ func (x *VoiceFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceFrame.ProtoReflect.Descriptor instead.
 func (*VoiceFrame) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{7}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *VoiceFrame) GetCallUuid() string {
@@ -883,7 +965,7 @@ type SdsRelay struct {
 
 func (x *SdsRelay) Reset() {
 	*x = SdsRelay{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[8]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +977,7 @@ func (x *SdsRelay) String() string {
 func (*SdsRelay) ProtoMessage() {}
 
 func (x *SdsRelay) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[8]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +990,7 @@ func (x *SdsRelay) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SdsRelay.ProtoReflect.Descriptor instead.
 func (*SdsRelay) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{8}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SdsRelay) GetSourceIssi() uint32 {
@@ -940,7 +1022,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[9]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -952,7 +1034,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[9]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -965,7 +1047,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{9}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{10}
 }
 
 type SyncSubscriber struct {
@@ -978,7 +1060,7 @@ type SyncSubscriber struct {
 
 func (x *SyncSubscriber) Reset() {
 	*x = SyncSubscriber{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[10]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -990,7 +1072,7 @@ func (x *SyncSubscriber) String() string {
 func (*SyncSubscriber) ProtoMessage() {}
 
 func (x *SyncSubscriber) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[10]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1003,7 +1085,7 @@ func (x *SyncSubscriber) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncSubscriber.ProtoReflect.Descriptor instead.
 func (*SyncSubscriber) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{10}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SyncSubscriber) GetGssis() []uint32 {
@@ -1030,7 +1112,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[11]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1042,7 +1124,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[11]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1055,7 +1137,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{11}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SyncResponse) GetSubscribers() map[string]*SyncSubscriber {
@@ -1075,7 +1157,7 @@ type GossipPeer struct {
 
 func (x *GossipPeer) Reset() {
 	*x = GossipPeer{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[12]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1087,7 +1169,7 @@ func (x *GossipPeer) String() string {
 func (*GossipPeer) ProtoMessage() {}
 
 func (x *GossipPeer) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[12]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1100,7 +1182,7 @@ func (x *GossipPeer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GossipPeer.ProtoReflect.Descriptor instead.
 func (*GossipPeer) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{12}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GossipPeer) GetName() string {
@@ -1126,7 +1208,7 @@ type PeerExchange struct {
 
 func (x *PeerExchange) Reset() {
 	*x = PeerExchange{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[13]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1138,7 +1220,7 @@ func (x *PeerExchange) String() string {
 func (*PeerExchange) ProtoMessage() {}
 
 func (x *PeerExchange) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[13]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1151,7 +1233,7 @@ func (x *PeerExchange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerExchange.ProtoReflect.Descriptor instead.
 func (*PeerExchange) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{13}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PeerExchange) GetPeers() []*GossipPeer {
@@ -1172,7 +1254,7 @@ type UsersDbOffer struct {
 
 func (x *UsersDbOffer) Reset() {
 	*x = UsersDbOffer{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[14]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1184,7 +1266,7 @@ func (x *UsersDbOffer) String() string {
 func (*UsersDbOffer) ProtoMessage() {}
 
 func (x *UsersDbOffer) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[14]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1197,7 +1279,7 @@ func (x *UsersDbOffer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsersDbOffer.ProtoReflect.Descriptor instead.
 func (*UsersDbOffer) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{14}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *UsersDbOffer) GetTimestamp() string {
@@ -1229,7 +1311,7 @@ type UsersDbRequest struct {
 
 func (x *UsersDbRequest) Reset() {
 	*x = UsersDbRequest{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[15]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1241,7 +1323,7 @@ func (x *UsersDbRequest) String() string {
 func (*UsersDbRequest) ProtoMessage() {}
 
 func (x *UsersDbRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[15]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1254,7 +1336,7 @@ func (x *UsersDbRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsersDbRequest.ProtoReflect.Descriptor instead.
 func (*UsersDbRequest) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{15}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{16}
 }
 
 type PositionSample struct {
@@ -1269,7 +1351,7 @@ type PositionSample struct {
 
 func (x *PositionSample) Reset() {
 	*x = PositionSample{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[16]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1281,7 +1363,7 @@ func (x *PositionSample) String() string {
 func (*PositionSample) ProtoMessage() {}
 
 func (x *PositionSample) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[16]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1294,7 +1376,7 @@ func (x *PositionSample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PositionSample.ProtoReflect.Descriptor instead.
 func (*PositionSample) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{16}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PositionSample) GetIssi() uint32 {
@@ -1335,7 +1417,7 @@ type StationUpdate struct {
 
 func (x *StationUpdate) Reset() {
 	*x = StationUpdate{}
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[17]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1347,7 +1429,7 @@ func (x *StationUpdate) String() string {
 func (*StationUpdate) ProtoMessage() {}
 
 func (x *StationUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[17]
+	mi := &file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1360,7 +1442,7 @@ func (x *StationUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StationUpdate.ProtoReflect.Descriptor instead.
 func (*StationUpdate) Descriptor() ([]byte, []int) {
-	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{17}
+	return file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StationUpdate) GetStation() *structpb.Struct {
@@ -1379,7 +1461,7 @@ const file_internal_federation_proto_v2_federation_v2_draft_proto_rawDesc = "" +
 	"\acontrol\x18\x01 \x01(\v2 .freetetra.federation.v2.ControlH\x00R\acontrol\x12F\n" +
 	"\vvoice_frame\x18\x02 \x01(\v2#.freetetra.federation.v2.VoiceFrameH\x00R\n" +
 	"voiceFrameB\x06\n" +
-	"\x04body\"\xf3\b\n" +
+	"\x04body\"\xb8\t\n" +
 	"\aControl\x12\x16\n" +
 	"\x06origin\x18\x01 \x01(\tR\x06origin\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12\x15\n" +
@@ -1400,7 +1482,9 @@ const file_internal_federation_proto_v2_federation_v2_draft_proto_rawDesc = "" +
 	"\x0eusers_db_offer\x18\x13 \x01(\v2%.freetetra.federation.v2.UsersDbOfferH\x00R\fusersDbOffer\x12S\n" +
 	"\x10users_db_request\x18\x14 \x01(\v2'.freetetra.federation.v2.UsersDbRequestH\x00R\x0eusersDbRequest\x12R\n" +
 	"\x0fposition_sample\x18\x15 \x01(\v2'.freetetra.federation.v2.PositionSampleH\x00R\x0epositionSample\x12O\n" +
-	"\x0estation_update\x18\x16 \x01(\v2&.freetetra.federation.v2.StationUpdateH\x00R\rstationUpdateB\t\n" +
+	"\x0estation_update\x18\x16 \x01(\v2&.freetetra.federation.v2.StationUpdateH\x00R\rstationUpdate\x12C\n" +
+	"\n" +
+	"call_reply\x18\x17 \x01(\v2\".freetetra.federation.v2.CallReplyH\x00R\tcallReplyB\t\n" +
 	"\apayload\"?\n" +
 	"\x05Hello\x12\x19\n" +
 	"\budp_addr\x18\x01 \x01(\tR\audpAddr\x12\x1b\n" +
@@ -1431,7 +1515,11 @@ const file_internal_federation_proto_v2_federation_v2_draft_proto_rawDesc = "" +
 	"\tdest_issi\x18\x06 \x01(\rR\bdestIssi\"3\n" +
 	"\aCallEnd\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x14\n" +
-	"\x05cause\x18\x02 \x01(\rR\x05cause\"H\n" +
+	"\x05cause\x18\x02 \x01(\rR\x05cause\"K\n" +
+	"\tCallReply\x12\x12\n" +
+	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\rR\x05state\x12\x14\n" +
+	"\x05cause\x18\x03 \x01(\rR\x05cause\"H\n" +
 	"\n" +
 	"VoiceFrame\x12\x1b\n" +
 	"\tcall_uuid\x18\x01 \x01(\tR\bcallUuid\x12\x1d\n" +
@@ -1485,7 +1573,7 @@ func file_internal_federation_proto_v2_federation_v2_draft_proto_rawDescGZIP() [
 }
 
 var file_internal_federation_proto_v2_federation_v2_draft_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_internal_federation_proto_v2_federation_v2_draft_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_internal_federation_proto_v2_federation_v2_draft_proto_goTypes = []any{
 	(SubscriberUpdate_Action)(0), // 0: freetetra.federation.v2.SubscriberUpdate.Action
 	(AffiliateUpdate_Action)(0),  // 1: freetetra.federation.v2.AffiliateUpdate.Action
@@ -1496,49 +1584,51 @@ var file_internal_federation_proto_v2_federation_v2_draft_proto_goTypes = []any{
 	(*AffiliateUpdate)(nil),      // 6: freetetra.federation.v2.AffiliateUpdate
 	(*CallStart)(nil),            // 7: freetetra.federation.v2.CallStart
 	(*CallEnd)(nil),              // 8: freetetra.federation.v2.CallEnd
-	(*VoiceFrame)(nil),           // 9: freetetra.federation.v2.VoiceFrame
-	(*SdsRelay)(nil),             // 10: freetetra.federation.v2.SdsRelay
-	(*SyncRequest)(nil),          // 11: freetetra.federation.v2.SyncRequest
-	(*SyncSubscriber)(nil),       // 12: freetetra.federation.v2.SyncSubscriber
-	(*SyncResponse)(nil),         // 13: freetetra.federation.v2.SyncResponse
-	(*GossipPeer)(nil),           // 14: freetetra.federation.v2.GossipPeer
-	(*PeerExchange)(nil),         // 15: freetetra.federation.v2.PeerExchange
-	(*UsersDbOffer)(nil),         // 16: freetetra.federation.v2.UsersDbOffer
-	(*UsersDbRequest)(nil),       // 17: freetetra.federation.v2.UsersDbRequest
-	(*PositionSample)(nil),       // 18: freetetra.federation.v2.PositionSample
-	(*StationUpdate)(nil),        // 19: freetetra.federation.v2.StationUpdate
-	nil,                          // 20: freetetra.federation.v2.SyncResponse.SubscribersEntry
-	(*structpb.Struct)(nil),      // 21: google.protobuf.Struct
+	(*CallReply)(nil),            // 9: freetetra.federation.v2.CallReply
+	(*VoiceFrame)(nil),           // 10: freetetra.federation.v2.VoiceFrame
+	(*SdsRelay)(nil),             // 11: freetetra.federation.v2.SdsRelay
+	(*SyncRequest)(nil),          // 12: freetetra.federation.v2.SyncRequest
+	(*SyncSubscriber)(nil),       // 13: freetetra.federation.v2.SyncSubscriber
+	(*SyncResponse)(nil),         // 14: freetetra.federation.v2.SyncResponse
+	(*GossipPeer)(nil),           // 15: freetetra.federation.v2.GossipPeer
+	(*PeerExchange)(nil),         // 16: freetetra.federation.v2.PeerExchange
+	(*UsersDbOffer)(nil),         // 17: freetetra.federation.v2.UsersDbOffer
+	(*UsersDbRequest)(nil),       // 18: freetetra.federation.v2.UsersDbRequest
+	(*PositionSample)(nil),       // 19: freetetra.federation.v2.PositionSample
+	(*StationUpdate)(nil),        // 20: freetetra.federation.v2.StationUpdate
+	nil,                          // 21: freetetra.federation.v2.SyncResponse.SubscribersEntry
+	(*structpb.Struct)(nil),      // 22: google.protobuf.Struct
 }
 var file_internal_federation_proto_v2_federation_v2_draft_proto_depIdxs = []int32{
 	3,  // 0: freetetra.federation.v2.StreamFrame.control:type_name -> freetetra.federation.v2.Control
-	9,  // 1: freetetra.federation.v2.StreamFrame.voice_frame:type_name -> freetetra.federation.v2.VoiceFrame
+	10, // 1: freetetra.federation.v2.StreamFrame.voice_frame:type_name -> freetetra.federation.v2.VoiceFrame
 	4,  // 2: freetetra.federation.v2.Control.hello:type_name -> freetetra.federation.v2.Hello
 	5,  // 3: freetetra.federation.v2.Control.subscriber_update:type_name -> freetetra.federation.v2.SubscriberUpdate
 	6,  // 4: freetetra.federation.v2.Control.affiliate_update:type_name -> freetetra.federation.v2.AffiliateUpdate
 	7,  // 5: freetetra.federation.v2.Control.call_start:type_name -> freetetra.federation.v2.CallStart
 	8,  // 6: freetetra.federation.v2.Control.call_end:type_name -> freetetra.federation.v2.CallEnd
-	10, // 7: freetetra.federation.v2.Control.sds_relay:type_name -> freetetra.federation.v2.SdsRelay
-	11, // 8: freetetra.federation.v2.Control.sync_request:type_name -> freetetra.federation.v2.SyncRequest
-	13, // 9: freetetra.federation.v2.Control.sync_response:type_name -> freetetra.federation.v2.SyncResponse
-	15, // 10: freetetra.federation.v2.Control.peer_exchange:type_name -> freetetra.federation.v2.PeerExchange
-	16, // 11: freetetra.federation.v2.Control.users_db_offer:type_name -> freetetra.federation.v2.UsersDbOffer
-	17, // 12: freetetra.federation.v2.Control.users_db_request:type_name -> freetetra.federation.v2.UsersDbRequest
-	18, // 13: freetetra.federation.v2.Control.position_sample:type_name -> freetetra.federation.v2.PositionSample
-	19, // 14: freetetra.federation.v2.Control.station_update:type_name -> freetetra.federation.v2.StationUpdate
-	0,  // 15: freetetra.federation.v2.SubscriberUpdate.action:type_name -> freetetra.federation.v2.SubscriberUpdate.Action
-	1,  // 16: freetetra.federation.v2.AffiliateUpdate.action:type_name -> freetetra.federation.v2.AffiliateUpdate.Action
-	20, // 17: freetetra.federation.v2.SyncResponse.subscribers:type_name -> freetetra.federation.v2.SyncResponse.SubscribersEntry
-	14, // 18: freetetra.federation.v2.PeerExchange.peers:type_name -> freetetra.federation.v2.GossipPeer
-	21, // 19: freetetra.federation.v2.StationUpdate.station:type_name -> google.protobuf.Struct
-	12, // 20: freetetra.federation.v2.SyncResponse.SubscribersEntry.value:type_name -> freetetra.federation.v2.SyncSubscriber
-	2,  // 21: freetetra.federation.v2.FederationTransportV2.Connect:input_type -> freetetra.federation.v2.StreamFrame
-	2,  // 22: freetetra.federation.v2.FederationTransportV2.Connect:output_type -> freetetra.federation.v2.StreamFrame
-	22, // [22:23] is the sub-list for method output_type
-	21, // [21:22] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	11, // 7: freetetra.federation.v2.Control.sds_relay:type_name -> freetetra.federation.v2.SdsRelay
+	12, // 8: freetetra.federation.v2.Control.sync_request:type_name -> freetetra.federation.v2.SyncRequest
+	14, // 9: freetetra.federation.v2.Control.sync_response:type_name -> freetetra.federation.v2.SyncResponse
+	16, // 10: freetetra.federation.v2.Control.peer_exchange:type_name -> freetetra.federation.v2.PeerExchange
+	17, // 11: freetetra.federation.v2.Control.users_db_offer:type_name -> freetetra.federation.v2.UsersDbOffer
+	18, // 12: freetetra.federation.v2.Control.users_db_request:type_name -> freetetra.federation.v2.UsersDbRequest
+	19, // 13: freetetra.federation.v2.Control.position_sample:type_name -> freetetra.federation.v2.PositionSample
+	20, // 14: freetetra.federation.v2.Control.station_update:type_name -> freetetra.federation.v2.StationUpdate
+	9,  // 15: freetetra.federation.v2.Control.call_reply:type_name -> freetetra.federation.v2.CallReply
+	0,  // 16: freetetra.federation.v2.SubscriberUpdate.action:type_name -> freetetra.federation.v2.SubscriberUpdate.Action
+	1,  // 17: freetetra.federation.v2.AffiliateUpdate.action:type_name -> freetetra.federation.v2.AffiliateUpdate.Action
+	21, // 18: freetetra.federation.v2.SyncResponse.subscribers:type_name -> freetetra.federation.v2.SyncResponse.SubscribersEntry
+	15, // 19: freetetra.federation.v2.PeerExchange.peers:type_name -> freetetra.federation.v2.GossipPeer
+	22, // 20: freetetra.federation.v2.StationUpdate.station:type_name -> google.protobuf.Struct
+	13, // 21: freetetra.federation.v2.SyncResponse.SubscribersEntry.value:type_name -> freetetra.federation.v2.SyncSubscriber
+	2,  // 22: freetetra.federation.v2.FederationTransportV2.Connect:input_type -> freetetra.federation.v2.StreamFrame
+	2,  // 23: freetetra.federation.v2.FederationTransportV2.Connect:output_type -> freetetra.federation.v2.StreamFrame
+	23, // [23:24] is the sub-list for method output_type
+	22, // [22:23] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_internal_federation_proto_v2_federation_v2_draft_proto_init() }
@@ -1564,6 +1654,7 @@ func file_internal_federation_proto_v2_federation_v2_draft_proto_init() {
 		(*Control_UsersDbRequest)(nil),
 		(*Control_PositionSample)(nil),
 		(*Control_StationUpdate)(nil),
+		(*Control_CallReply)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1571,7 +1662,7 @@ func file_internal_federation_proto_v2_federation_v2_draft_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_federation_proto_v2_federation_v2_draft_proto_rawDesc), len(file_internal_federation_proto_v2_federation_v2_draft_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
