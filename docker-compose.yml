@@ -55,3 +55,31 @@ services:
     depends_on:
       - freetetra
     restart: unless-stopped
+
+  # Optional DMR/BrandMeister bridge for TG 91+. Disabled unless an env file
+  # (typically .env.dmrbridge) provides DMRBRIDGE_BM_USER + DMRBRIDGE_BM_PASS.
+  # Start with: docker compose --profile dmrbridge up -d dmrbridge
+  #
+  # Gate: only source ISSIs that exist in the local RadioID users.txt may
+  # transmit into BrandMeister. Everyone else stays listen-only on TG 91+.
+  # Disable the gate with DMRBRIDGE_REQUIRE_RADIOID=false in the env file.
+  dmrbridge:
+    build: .
+    image: freetetra:latest
+    container_name: freetetra-dmrbridge
+    entrypoint: ["/app/tetra-brew-dmrbridge"]
+    profiles: ["dmrbridge"]
+    env_file:
+      - ${ENV_COMMON_FILE:-.env}
+      - ${ENV_DMRBRIDGE_FILE:-.env.dmrbridge}
+    environment:
+      DMRBRIDGE_FT_BASE_URL: http://freetetra:8101
+      DMRBRIDGE_BM_BASE_URL: https://core.tetrapack.online:443
+      DMRBRIDGE_TGS: "91,262,2621,2622,9990"
+      DMRBRIDGE_REQUIRE_RADIOID: "true"
+      RADIOID_USERS_FILE: /app/data/users.txt
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      - freetetra
+    restart: unless-stopped
