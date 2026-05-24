@@ -3,10 +3,12 @@ package service
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
@@ -22,8 +24,11 @@ type WebRadioBridge struct {
 	logger *log.Logger
 	plane  InjectionPlane
 
+	telemetry *webradioTelemetry
+
 	mu     sync.Mutex
 	cancel context.CancelFunc
+	server *http.Server // optional, started when cfg.WebRadio.ListenAddr is set
 	wg     sync.WaitGroup
 }
 
@@ -41,11 +46,16 @@ func NewWebRadioBridge(cfg config.Config, logger *log.Logger, plane InjectionPla
 		return nil, fmt.Errorf("WEBRADIO_ENCODER_BIN is required")
 	}
 	return &WebRadioBridge{
-		cfg:    cfg,
-		logger: logger,
-		plane:  plane,
+		cfg:       cfg,
+		logger:    logger,
+		plane:     plane,
+		telemetry: &webradioTelemetry{},
 	}, nil
 }
+
+// Telemetry exposes the live observability state for the status endpoint
+// and (in task 6) the silence-aware TX gate.
+func (b *WebRadioBridge) Telemetry() *webradioTelemetry { return b.telemetry }
 
 func (b *WebRadioBridge) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
@@ -71,15 +81,74 @@ func (b *WebRadioBridge) Start(ctx context.Context) error {
 	)
 
 	go b.runLoop(runCtx)
+	b.maybeStartHTTPServer()
+	b.maybeStartTelemetryLogger(runCtx)
 	return nil
+}
+
+// maybeStartHTTPServer brings up a small status server if ListenAddr is set.
+// Failures are logged but don't break the audio pipeline — the operator gets
+// a degraded experience (no /api/webradio/status), not a dead container.
+func (b *WebRadioBridge) maybeStartHTTPServer() {
+	addr := strings.TrimSpace(b.cfg.WebRadio.ListenAddr)
+	if addr == "" {
+		return
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/webradio/status", b.handleStatus)
+	srv := &http.Server{Addr: addr, Handler: mux}
+	b.mu.Lock()
+	b.server = srv
+	b.mu.Unlock()
+	go func() {
+		b.logger.Printf("webradio status server listening on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			b.logger.Printf("webradio status server error: %v", err)
+		}
+	}()
+}
+
+func (b *WebRadioBridge) handleStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(b.telemetry.Snapshot())
+}
+
+// maybeStartTelemetryLogger emits a one-line summary every
+// TelemetryLogEvery (default 30s). Skips if the cadence is zero.
+func (b *WebRadioBridge) maybeStartTelemetryLogger(ctx context.Context) {
+	every := b.cfg.WebRadio.TelemetryLogEvery
+	if every <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				snap := b.telemetry.Snapshot()
+				b.logger.Printf("webradio telemetry silence=%t silence_dur=%.2fs",
+					snap.Silence, snap.SilenceDur)
+			}
+		}
+	}()
 }
 
 func (b *WebRadioBridge) Stop() {
 	b.mu.Lock()
 	cancel := b.cancel
+	srv := b.server
 	b.cancel = nil
+	b.server = nil
 	b.mu.Unlock()
 
+	if srv != nil {
+		shutdownCtx, c := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = srv.Shutdown(shutdownCtx)
+		c()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -323,10 +392,20 @@ func packCodecBitsToSTE(bits []byte) []byte {
 
 func (b *WebRadioBridge) logCommandOutput(prefix string, r io.Reader) {
 	sc := bufio.NewScanner(r)
+	// ffmpeg can emit long status lines (e.g. silencedetect spam under heavy
+	// dynamics); bump the per-token buffer above bufio's 64 KiB default so
+	// the scanner doesn't bail with ErrTooLong.
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
+		}
+		// Tee through the telemetry parser before logging. Recognized lines
+		// still go through the logger — visibility matters more than the
+		// few bytes of duplication.
+		if b.telemetry != nil {
+			_ = b.telemetry.ParseLine(line)
 		}
 		b.logger.Printf("%s: %s", prefix, line)
 	}

@@ -56,5 +56,12 @@ func BuildWebRadioFilterChain(cfg config.WebRadioConfig) string {
 		lin := math.Pow(10, cfg.LimiterDBFS/20.0)
 		fc.add(fmt.Sprintf("alimiter=level_in=1:level_out=1:limit=%.6f", lin))
 	}
+	// silencedetect runs purely as a metadata sink — it doesn't alter audio,
+	// just emits "silence_start"/"silence_end" lines to ffmpeg stderr that
+	// the bridge's telemetry parser scrapes. Kept at the very end so it sees
+	// the final post-limiter signal.
+	if cfg.Silencedetect {
+		fc.add(fmt.Sprintf("silencedetect=noise=%ddB:d=%g", cfg.SilenceNoiseDB, cfg.SilenceMinDur.Seconds()))
+	}
 	return fc.String()
 }

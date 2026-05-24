@@ -186,6 +186,19 @@ type WebRadioConfig struct {
 	// LimiterDBFS sets a soft brickwall just before the encoder. Negative
 	// → ceiling in dBFS (e.g. -0.5 ≈ 0.944 linear). Zero/positive disables.
 	LimiterDBFS float64
+
+	// Silence detection (uses ffmpeg's silencedetect filter). When on, the
+	// bridge parses silence_start/silence_end events from ffmpeg stderr
+	// and exposes the current Silence flag via /api/webradio/status.
+	// Silence-aware TX gating in task 6 reads from the same state.
+	Silencedetect    bool
+	SilenceNoiseDB   int           // -dB threshold for "silence"; default -50
+	SilenceMinDur    time.Duration // minimum run before silence_start fires; default 1.5s
+
+	// ListenAddr enables a small HTTP server inside the webradio binary.
+	// Empty → no server (legacy behavior). When set, serves /api/webradio/status.
+	ListenAddr        string
+	TelemetryLogEvery time.Duration // periodic summary log cadence; default 30s
 }
 
 type ZelloConfig struct {
@@ -313,6 +326,11 @@ func LoadFromEnv() (Config, error) {
 			LoudnormTP:       envFloat("WEBRADIO_LOUDNORM_TP", -1.5),
 			LoudnormLRA:      envFloat("WEBRADIO_LOUDNORM_LRA", 11),
 			LimiterDBFS:      envFloat("WEBRADIO_LIMITER_DBFS", 0),
+			Silencedetect:    envBool("WEBRADIO_SILENCEDETECT", false),
+			SilenceNoiseDB:   envInt("WEBRADIO_SILENCE_NOISE_DB", -50),
+			SilenceMinDur:    envDuration("WEBRADIO_SILENCE_MIN_DUR", 1500*time.Millisecond),
+			ListenAddr:       env("WEBRADIO_LISTEN_ADDR", ""),
+			TelemetryLogEvery: envDuration("WEBRADIO_TELEMETRY_LOG_EVERY", 30*time.Second),
 		},
 		Zello: ZelloConfig{
 			Enabled:          envBool("ZELLO_ENABLED", false),
