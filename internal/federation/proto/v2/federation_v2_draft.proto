@@ -94,6 +94,8 @@ message CallStart {
   uint32 dest_gssi = 3;
   uint32 priority = 4;
   uint32 service = 5;
+  // 0 = group call (use dest_gssi); nonzero = private call to this ISSI
+  uint32 dest_issi = 6;
 }
 
 message CallEnd {

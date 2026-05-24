@@ -49,3 +49,26 @@ services:
     depends_on:
       - ft-c
     restart: unless-stopped
+
+  # Opt-in: a tetra-brew-proxy that registers as a bridge ISSI on ft-a and
+  # auto-dials a target ISSI (potentially on a federated peer, e.g. ft-b)
+  # whenever someone calls the bridge ISSI. Uncomment to enable.
+  # loopback-proxy:
+  #   build:
+  #     context: ../..
+  #     dockerfile: Dockerfile
+  #   container_name: ft-loop-proxy
+  #   entrypoint: ["/app/tetra-brew-proxy"]
+  #   environment:
+  #     BREW_MODE: proxy
+  #     BREW_CLIENT_BASE_URL: http://ft-a:8091
+  #     BREW_CLIENT_USERNAME: loopback
+  #     BREW_CLIENT_PASSWORD: loopbackpass
+  #     PROXY_BRIDGE_ISSI: "999"
+  #     PROXY_TARGET_ISSI: "1002"
+  #     PROXY_DIAL_TIMEOUT: "10s"
+  #     PROXY_IDLE_TIMEOUT: "60s"
+  #     PROXY_MAX_CONCURRENT: "4"
+  #   depends_on:
+  #     - ft-a
+  #   restart: unless-stopped
