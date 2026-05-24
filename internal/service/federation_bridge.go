@@ -143,12 +143,20 @@ func (fb *federationBridge) syncAllSubscribers() {
 			subCount++
 		}
 	}
-	// Stations mitsynchronisieren — falls ein Peer-Server neu connectet
-	// oder nach Netzaussetzer, kriegt er den aktuellen Stations-Stand.
-	// Tombstones MUST be included so deletes converge across the mesh.
+	// Stations mitsynchronisieren — nur unsere EIGENEN (Origin=="") werden
+	// re-broadcastet. Sonst konkurriert ein Relay-anti-entropy mit dem
+	// Originator-anti-entropy bei jedem Tick und der gespeicherte Origin
+	// kippt zwischen Werten hin und her. Foederierte Stationen propagieren
+	// weiterhin per Mesh-Relay beim Erstempfang; nur das periodische
+	// Re-Broadcasten ist auf den Originator beschraenkt (analog Subscribers).
+	// Tombstones einer lokalen Station gehoeren weiterhin dazu, damit Deletes
+	// konvergieren.
 	stCount := 0
 	if fb.svc.stationStore != nil {
 		for _, st := range fb.svc.stationStore.AllIncludingDeleted() {
+			if st.Origin != "" {
+				continue
+			}
 			st := st // copy
 			fb.NotifyStationUpdate(&st)
 			stCount++
