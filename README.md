@@ -193,6 +193,20 @@ part of the core server. Run them alongside the server if needed.
 By convention service bots should run on local TGs (1-9) so they don't
 create federation ping-pong with other servers running similar bots.
 
+### DMR bridge gating
+
+`tetra-brew-dmrbridge` only forwards calls into DMR/BrandMeister when the
+source ISSI exists in the local RadioID `users.txt` (BM-side licensing
+constraint). Calls without a valid DMR ID still federate normally inside
+FreeTetra — they just can't push into BM. Reverse direction (BM → FT) is
+ungated; BM only emits valid DMR IDs to begin with.
+
+Disable the gate (everyone may TX to BM):
+
+```env
+DMRBRIDGE_REQUIRE_RADIOID=false
+```
+
 ## Build
 
 ACELP codec is included under `codec/`. No external downloads.

@@ -32,6 +32,11 @@ type Bridge struct {
 
 	talkgroups map[uint32]struct{}
 
+	// bmGate vets FT→BM forwards by source ISSI. Returns true if the call may
+	// cross into BM. Reverse direction (BM→FT) is not gated — BM already only
+	// emits valid DMR IDs. nil = no gate (everyone bridges).
+	bmGate func(sourceISSI uint32) bool
+
 	mu sync.Mutex
 	// Map original call ID -> mirror call info on the OTHER side.
 	ftCalls map[uuid.UUID]*mirror // call ID seen on FT, mirrored to BM
@@ -70,6 +75,14 @@ func New(logger *log.Logger, ft, bm *service.BrewModulePlane, ftSource, bmSource
 	}
 	ft.SetMessageHandlers(b.onFTCall, b.onFTFrame, nil)
 	bm.SetMessageHandlers(b.onBMCall, b.onBMFrame, nil)
+	return b
+}
+
+// WithBMGate installs a per-call source-ISSI check for FT→BM forwards.
+// Calls whose source returns false are silently dropped on the BM side;
+// they still federate freely within FreeTetra. nil clears the gate.
+func (b *Bridge) WithBMGate(gate func(sourceISSI uint32) bool) *Bridge {
+	b.bmGate = gate
 	return b
 }
 
@@ -180,6 +193,11 @@ func (b *Bridge) handleCall(
 		}
 		if !b.bridges(gp.Destination) {
 			b.logger.Printf("dmrbridge: %s GroupTX TG=%d not in bridge list", srcLabel, gp.Destination)
+			return
+		}
+		if srcLabel == "FT" && b.bmGate != nil && !b.bmGate(gp.Source) {
+			b.logger.Printf("dmrbridge: FT→BM DROP TG=%d src=%d (no valid DMR ID — listen-only)",
+				gp.Destination, gp.Source)
 			return
 		}
 		mirrorID := uuid.New()

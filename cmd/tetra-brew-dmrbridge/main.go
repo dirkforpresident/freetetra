@@ -74,6 +74,22 @@ func main() {
 
 	bridge := dmrbridge.New(logger, ftPlane, bmPlane, ftSourceOverride, bmSourceOverride, tgs)
 
+	// FT→BM gate: only sources with a valid DMR ID may transmit into
+	// BrandMeister. Everyone else is listen-only on the BM TGs (calls
+	// from BM still federate into FT — they just can't push back out).
+	// Disable with DMRBRIDGE_REQUIRE_RADIOID=false.
+	if envStr("DMRBRIDGE_REQUIRE_RADIOID", "true") != "false" {
+		usersFile := envStr("RADIOID_USERS_FILE", "/opt/freetetra/users.txt")
+		auth := service.NewRadioIDAuth(logger, true, usersFile)
+		bridge.WithBMGate(func(issi uint32) bool {
+			_, ok := auth.Verify(issi)
+			return ok
+		})
+		logger.Printf("dmrbridge: FT→BM gate enabled, users file %s", usersFile)
+	} else {
+		logger.Printf("dmrbridge: FT→BM gate DISABLED (DMRBRIDGE_REQUIRE_RADIOID=false)")
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
