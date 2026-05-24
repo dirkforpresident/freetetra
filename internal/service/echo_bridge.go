@@ -126,6 +126,16 @@ func (e *EchoBridge) OnBrewCallControl(m *brew.CallControlMessage) {
 		if p.Destination != e.talkgroup {
 			return
 		}
+		// Don't capture our own playback. The echo bridge broadcasts to the
+		// same TG it listens on; without this guard, every playback would
+		// trigger a fresh capture (source == our playback ISSI), which would
+		// then play back, capture again, ad infinitum — the TG would never
+		// release. The federation-relayed copies of our own playback come
+		// back with the same source ISSI too, so this also catches the
+		// echo-of-echo across federation.
+		if mySrc := e.playbackSourceISSI(0); mySrc != 0 && p.Source == mySrc {
+			return
+		}
 		e.mu.Lock()
 		cap := e.ensureCaptureLocked(m.Identifier)
 		cap.sourceISSI = p.Source

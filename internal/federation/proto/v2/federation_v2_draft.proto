@@ -52,6 +52,7 @@ message Control {
     UsersDbRequest users_db_request = 20;
     PositionSample position_sample = 21;
     StationUpdate station_update = 22;
+    CallReply call_reply = 23;
   }
 }
 
@@ -101,6 +102,18 @@ message CallStart {
 message CallEnd {
   string uuid = 1;
   uint32 cause = 2;
+}
+
+// CallReply carries the post-CallStart signaling states that aren't a full
+// CallEnd: SetupAccept (state 5), SetupReject (6), and ConnectRequest (8)
+// from the brew protocol. These travel back from the answerer's federation
+// side to the caller's federation side so private/duplex calls can complete
+// across a federation hop. State values are kept aligned with the brew
+// CallState* constants in internal/brew/protocol.go.
+message CallReply {
+  string uuid = 1;
+  uint32 state = 2;
+  uint32 cause = 3;
 }
 
 message VoiceFrame {

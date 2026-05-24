@@ -19,6 +19,7 @@ type fakeEvent struct {
 	callID  uuid.UUID
 	source  uint32
 	dest    uint32
+	duplex  uint8
 	cause   uint8
 	data    []byte
 }
@@ -28,10 +29,16 @@ type fakeProxyPlane struct {
 	events []fakeEvent
 }
 
-func (f *fakeProxyPlane) SendSetupRequest(callID uuid.UUID, source, dest uint32) bool {
+func (f *fakeProxyPlane) SendSetupRequest(callID uuid.UUID, p brew.CircularCallPayload) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.events = append(f.events, fakeEvent{kind: "setup-req", callID: callID, source: source, dest: dest})
+	f.events = append(f.events, fakeEvent{
+		kind:   "setup-req",
+		callID: callID,
+		source: p.Source,
+		dest:   p.Destination,
+		duplex: p.Duplex,
+	})
 	return true
 }
 
@@ -49,10 +56,29 @@ func (f *fakeProxyPlane) SendSetupReject(callID uuid.UUID, cause uint8) bool {
 	return true
 }
 
-func (f *fakeProxyPlane) SendConnectRequest(callID uuid.UUID, source, dest uint32) bool {
+func (f *fakeProxyPlane) SendConnectRequest(callID uuid.UUID, p brew.CircularCallPayload) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.events = append(f.events, fakeEvent{kind: "connect-req", callID: callID, source: source, dest: dest})
+	f.events = append(f.events, fakeEvent{
+		kind:   "connect-req",
+		callID: callID,
+		source: p.Source,
+		dest:   p.Destination,
+		duplex: p.Duplex,
+	})
+	return true
+}
+
+func (f *fakeProxyPlane) SendConnectConfirm(callID uuid.UUID, grant uint8, permission uint8) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, fakeEvent{
+		kind:   "connect-confirm",
+		callID: callID,
+		// repurpose source/dest to carry grant/permission for assertion
+		source: uint32(grant),
+		dest:   uint32(permission),
+	})
 	return true
 }
 
@@ -113,7 +139,7 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	b.OnBrewCallControl(&brew.CallControlMessage{
 		CallState:  brew.CallStateSetupRequest,
 		Identifier: inboundCallID,
-		Payload:    brew.CircularCallPayload{Source: 1001, Destination: 999},
+		Payload:    brew.CircularCallPayload{Source: 1001, Destination: 999, Duplex: 1},
 	})
 
 	accepts := plane.findKind("setup-accept")
@@ -128,19 +154,48 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	if setupReqs[0].source != 999 || setupReqs[0].dest != 1002 {
 		t.Fatalf("outbound SetupRequest src/dst: src=%d dst=%d", setupReqs[0].source, setupReqs[0].dest)
 	}
+	if setupReqs[0].duplex != 1 {
+		t.Fatalf("outbound SetupRequest duplex flag not mirrored: got %d want 1", setupReqs[0].duplex)
+	}
 	if outboundCallID == inboundCallID {
 		t.Fatalf("outbound and inbound call IDs collide")
 	}
 
-	// Outbound accepted -> expect ConnectRequest.
+	// Outbound SetupAccept -> bridge transitions to "ringing" state
+	// internally but does NOT emit any wire message. (Sending ConnectRequest
+	// here would be premature — the user hasn't picked up yet.)
 	b.OnBrewCallControl(&brew.CallControlMessage{
 		CallState:  brew.CallStateSetupAccept,
 		Identifier: outboundCallID,
 		Payload:    brew.EmptyPayload{},
 	})
+	if got := len(plane.findKind("connect-req")); got != 0 {
+		t.Fatalf("SetupAccept should NOT emit ConnectRequest yet, got %d", got)
+	}
+	if got := len(plane.findKind("connect-confirm")); got != 0 {
+		t.Fatalf("SetupAccept should NOT emit ConnectConfirm yet, got %d", got)
+	}
+
+	// Outbound ConnectRequest (the actual user-picked-up event) -> bridge
+	// fans ConnectRequest on inbound + ConnectConfirm on outbound.
+	b.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateConnectRequest,
+		Identifier: outboundCallID,
+		Payload:    brew.EmptyPayload{},
+	})
 	connects := plane.findKind("connect-req")
-	if len(connects) != 1 || connects[0].callID != outboundCallID || connects[0].source != 999 || connects[0].dest != 1002 {
-		t.Fatalf("expected ConnectRequest on outbound 999->1002, got %#v", connects)
+	if len(connects) != 1 || connects[0].callID != inboundCallID || connects[0].source != 999 || connects[0].dest != 1001 {
+		t.Fatalf("expected single ConnectRequest on INBOUND (bridge->caller 999->1001), got %#v", connects)
+	}
+	if connects[0].duplex != 1 {
+		t.Fatalf("inbound ConnectRequest duplex flag not mirrored: got %d want 1", connects[0].duplex)
+	}
+	confirms := plane.findKind("connect-confirm")
+	if len(confirms) != 1 || confirms[0].callID != outboundCallID {
+		t.Fatalf("expected single ConnectConfirm on outbound, got %#v", confirms)
+	}
+	if confirms[0].source != 1 || confirms[0].dest != 1 {
+		t.Fatalf("outbound ConnectConfirm grant/permission should be 1/1, got %d/%d", confirms[0].source, confirms[0].dest)
 	}
 
 	// Voice on inbound -> relayed to outbound.
@@ -180,6 +235,68 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	releases := plane.findKind("release")
 	if len(releases) != 1 || releases[0].callID != outboundCallID || releases[0].cause != 7 {
 		t.Fatalf("expected single release on outbound with cause=7, got %#v", releases)
+	}
+}
+
+// TestProxyBridge_OutboundConnectForwardsToInbound exercises the state=8
+// (ConnectRequest) path — the actual "user picked up" event that arrives
+// from the target's BS. The proxy must:
+//   - emit ConnectRequest on the INBOUND leg (so the caller's radio sees
+//     the answer and stops "ringing back"), and
+//   - emit ConnectConfirm (state=9) on the OUTBOUND leg (so the
+//     answerer's BS clears its connect-phase timer and doesn't drop
+//     the call as ExpiryOfTimer).
+func TestProxyBridge_OutboundConnectForwardsToInbound(t *testing.T) {
+	b, plane := newTestProxy(t, 999, 1002, 10*time.Second, 60*time.Second, 4)
+
+	inboundCallID := uuid.New()
+	b.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateSetupRequest,
+		Identifier: inboundCallID,
+		Payload:    brew.CircularCallPayload{Source: 1001, Destination: 999, Duplex: 1},
+	})
+	setupReqs := plane.findKind("setup-req")
+	if len(setupReqs) != 1 {
+		t.Fatalf("expected one outbound SetupRequest, got %d", len(setupReqs))
+	}
+	outboundCallID := setupReqs[0].callID
+
+	// Reset the plane's event log so we count only the post-Connect events.
+	plane.mu.Lock()
+	plane.events = nil
+	plane.mu.Unlock()
+
+	// Target picks up -> BS forwards U-CONNECT as Brew ConnectRequest.
+	b.OnBrewCallControl(&brew.CallControlMessage{
+		CallState:  brew.CallStateConnectRequest,
+		Identifier: outboundCallID,
+		Payload:    brew.EmptyPayload{},
+	})
+
+	connects := plane.findKind("connect-req")
+	if len(connects) != 1 {
+		t.Fatalf("expected exactly 1 ConnectRequest on INBOUND, got %d: %#v", len(connects), connects)
+	}
+	if connects[0].callID != inboundCallID {
+		t.Fatalf("ConnectRequest should be on INBOUND callID, got %s (inbound is %s)", connects[0].callID, inboundCallID)
+	}
+	if connects[0].source != 999 || connects[0].dest != 1001 {
+		t.Fatalf("inbound ConnectRequest src/dst should be bridge->caller (999->1001), got %d->%d", connects[0].source, connects[0].dest)
+	}
+	if connects[0].duplex != 1 {
+		t.Fatalf("inbound ConnectRequest duplex flag not mirrored: got %d", connects[0].duplex)
+	}
+
+	confirms := plane.findKind("connect-confirm")
+	if len(confirms) != 1 {
+		t.Fatalf("expected exactly 1 ConnectConfirm on OUTBOUND, got %d: %#v", len(confirms), confirms)
+	}
+	if confirms[0].callID != outboundCallID {
+		t.Fatalf("ConnectConfirm should be on OUTBOUND callID, got %s (outbound is %s)", confirms[0].callID, outboundCallID)
+	}
+	// fakeProxyPlane.SendConnectConfirm repurposes source=grant, dest=permission.
+	if confirms[0].source != 1 || confirms[0].dest != 1 {
+		t.Fatalf("ConnectConfirm grant/permission should be 1/1, got %d/%d", confirms[0].source, confirms[0].dest)
 	}
 }
 

@@ -27,7 +27,7 @@ onMounted(() => {
       <div class="card">
         <h2>{{ t("landing.what_is.title") }}</h2>
         <p>{{ t("landing.what_is.body1") }}</p>
-        <p v-html="t('landing.what_is.body2').replace('{{HOST}}', config?.host ?? '')" />
+        <p v-html="t('landing.what_is.body2', { HOST: config?.host ?? '' })" />
         <div class="federation-info" v-html="t('landing.what_is.based')" />
       </div>
 

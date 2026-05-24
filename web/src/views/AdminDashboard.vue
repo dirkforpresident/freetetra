@@ -97,15 +97,19 @@ async function update() {
       return (b.last_seen || 0) - (a.last_seen || 0);
     });
 
-    // Subscribers: local from dashboard snapshot, remote from peers (outgoing
-    // only). Service ISSIs (900000-999999) are filtered.
+    // Subscribers: local from dashboard snapshot, remote from peers. Both
+    // outgoing and incoming peers contribute — federation propagation is
+    // symmetric, and a peer we accept inbound carries the same authoritative
+    // ISSI list as one we dial. subsByIssi.has() keeps local first-wins and
+    // also dedupes the case where the same peer briefly has both an outgoing
+    // and an incoming record during the handshake. Service ISSIs
+    // (900000-999999) are filtered.
     const subsByIssi = new Map<number, SubscriberRow>();
     for (const s of snapshot.subscribers ?? []) {
       if (isServiceIssi(s.issi)) continue;
       subsByIssi.set(s.issi, { issi: s.issi, source: "local", gssis: s.groups ?? [] });
     }
     for (const p of peersResp.peers ?? []) {
-      if (p.direction !== "outgoing") continue;
       for (const issi of p.issis ?? []) {
         if (isServiceIssi(issi)) continue;
         if (subsByIssi.has(issi)) continue;
