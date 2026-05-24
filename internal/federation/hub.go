@@ -36,6 +36,14 @@ const (
 	// with FailedPrecondition; the dialer treats this as a permanent
 	// error and stops reconnecting.
 	MinSupportedProtocolVersion = 2
+
+	// peerRedemptionWindow keeps a disconnected peer's ISSI/GSSI tables
+	// around so a fast reconnect can adopt them instead of waiting for a
+	// fresh sync round-trip. Short flaps (e.g. an upstream nginx reset)
+	// no longer cause federated routing for that peer's subscribers to
+	// drop out, and the "cleaned up peer X (N ISSIs removed)" log only
+	// fires when the peer really stays gone.
+	peerRedemptionWindow = 30 * time.Second
 )
 
 // PeerConfig is the configuration for a federation peer.
@@ -80,6 +88,16 @@ func isFederatedGSSI(gssi uint32) bool {
 	return gssi >= federationGSSIMin
 }
 
+// pendingPeer is a disconnected peer being held in the redemption window —
+// its subscriber tables stay intact in case the same peer reconnects soon,
+// at which point registerPeer/renamePeer transfers the state to the new
+// peer object and cancels the timer. If the timer fires first, the peer is
+// fully cleaned up.
+type pendingPeer struct {
+	peer  *Peer
+	timer *time.Timer
+}
+
 // Hub manages all federation peer connections.
 type Hub struct {
 	federationv2pb.UnimplementedFederationTransportV2Server
@@ -92,6 +110,13 @@ type Hub struct {
 
 	mu    sync.RWMutex
 	peers map[string]*Peer // peer name -> Peer
+
+	// Peers whose stream just died but whose subscriber tables we're
+	// holding onto for peerRedemptionWindow in case the same peer
+	// reconnects. Keyed by the same direction-suffixed peerKey() as
+	// h.peers so a redemption matches the original slot exactly.
+	pendingMu    sync.Mutex
+	pendingPeers map[string]*pendingPeer
 
 	// Active calls routed to peers
 	callMu      sync.RWMutex
@@ -125,6 +150,7 @@ func NewHub(serverName, peerKey, selfURL, rpcListen string, handler CallHandler,
 		handler:            handler,
 		logger:             logger,
 		peers:              make(map[string]*Peer),
+		pendingPeers:       make(map[string]*pendingPeer),
 		activeCalls:        make(map[string]map[string]bool),
 		knownPeers:         make(map[string]string),
 		mesh:               newMeshRouter(serverName),
@@ -324,9 +350,7 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		go peer.writeLoop()
 		h.readLoop(peer)
 		_ = conn.Close()
-
-		// Cleanup and reconnect.
-		h.unregisterPeer(peer)
+		// readLoop's defer already ran unregisterPeer — don't double-cleanup.
 
 		// If the peer was rejected for a permanent reason (e.g. version
 		// mismatch) there is no point retrying — config or code on one
@@ -366,23 +390,53 @@ func waitBackoff(ctx context.Context, delay *time.Duration, base, max time.Durat
 }
 
 // readLoop reads messages from a peer.
+//
+// Recv() runs in a separate goroutine so the main loop can also wake on
+// peer.done — that's what lets registerPeer's eviction of an old incoming
+// peer actually unblock readLoop. Without this, an incoming peer's stream
+// stays alive after Close() (cancel is nil for incoming peers) and keeps
+// feeding handler.OnPeerVoiceFrame / OnPeerCallStart for traffic that's
+// also flowing through its replacement — the audio-duplication bug.
 func (h *Hub) readLoop(peer *Peer) {
-	defer func() {
-		h.unregisterPeer(peer)
+	defer h.unregisterPeer(peer)
+
+	type recvResult struct {
+		frame *federationv2pb.StreamFrame
+		err   error
+	}
+	recvCh := make(chan recvResult, 1)
+	go func() {
+		for {
+			frame, err := peer.stream.Recv()
+			select {
+			case recvCh <- recvResult{frame: frame, err: err}:
+			case <-peer.done:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
 	}()
 
 	for {
-		frame, err := peer.stream.Recv()
-		if err != nil {
-			if err != io.EOF {
-				h.logger.Printf("federation: %s read error: %v", peer.Name, err)
+		var r recvResult
+		select {
+		case r = <-recvCh:
+		case <-peer.done:
+			return
+		}
+
+		if r.err != nil {
+			if r.err != io.EOF {
+				h.logger.Printf("federation: %s read error: %v", peer.Name, r.err)
 			} else {
 				h.logger.Printf("federation: %s disconnected", peer.Name)
 			}
 			return
 		}
 
-		if ctrl := frame.GetControl(); ctrl != nil {
+		if ctrl := r.frame.GetControl(); ctrl != nil {
 			h.handleControlMessage(peer, ctrl)
 			// A handler (e.g. handleHello version-check) may have marked
 			// the peer for rejection. Exit the loop so Connect returns
@@ -393,7 +447,7 @@ func (h *Hub) readLoop(peer *Peer) {
 			}
 			continue
 		}
-		if vf := frame.GetVoiceFrame(); vf != nil {
+		if vf := r.frame.GetVoiceFrame(); vf != nil {
 			h.handleVoiceFrame(peer, vf.GetCallUuid(), vf.GetFrameData())
 		}
 	}
@@ -1214,13 +1268,68 @@ func (h *Hub) tryAddDiscoveredPeer(name, url string) bool {
 }
 
 func (h *Hub) registerPeer(peer *Peer) {
+	key := peerKey(peer.Name, peer.Direction)
+	h.redeemPending(peer, key)
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	key := peerKey(peer.Name, peer.Direction)
 	if old, ok := h.peers[key]; ok {
 		old.Close()
 	}
 	h.peers[key] = peer
+}
+
+// redeemPending transfers ISSI/GSSI tables from a pending (disconnected)
+// peer at the given key into the freshly-connected peer, and cancels the
+// pending-cleanup timer. No-op if there's nothing pending. Called from
+// registerPeer for the bootstrap-name case and from renamePeer for the
+// Hello-discovered-name case.
+func (h *Hub) redeemPending(newPeer *Peer, key string) {
+	h.pendingMu.Lock()
+	pending, ok := h.pendingPeers[key]
+	if !ok {
+		h.pendingMu.Unlock()
+		return
+	}
+	pending.timer.Stop()
+	delete(h.pendingPeers, key)
+	h.pendingMu.Unlock()
+
+	adoptPeerState(newPeer, pending.peer)
+	h.logger.Printf("federation: redeemed peer %s — kept %d ISSIs across reconnect",
+		newPeer.Name, len(newPeer.ISSIs()))
+}
+
+// adoptPeerState copies subscriber tables from src into dst. The dst peer
+// is assumed to be freshly created (its tables empty); we replace rather
+// than merge.
+func adoptPeerState(dst, src *Peer) {
+	src.mu.RLock()
+	issis := make(map[uint32]bool, len(src.issis))
+	for k, v := range src.issis {
+		issis[k] = v
+	}
+	gssis := make(map[uint32]map[uint32]bool, len(src.gssiAffiliations))
+	for g, members := range src.gssiAffiliations {
+		m := make(map[uint32]bool, len(members))
+		for k, v := range members {
+			m[k] = v
+		}
+		gssis[g] = m
+	}
+	src.mu.RUnlock()
+
+	dst.mu.Lock()
+	dst.issis = issis
+	dst.gssiAffiliations = gssis
+	dst.mu.Unlock()
+
+	// Empty src so a late-firing cleanup timer doesn't double-log the
+	// ISSI count we just transferred.
+	src.mu.Lock()
+	src.issis = make(map[uint32]bool)
+	src.gssiAffiliations = make(map[uint32]map[uint32]bool)
+	src.mu.Unlock()
 }
 
 // renamePeer updates a peer's Name and moves it to the correct map slot.
@@ -1230,15 +1339,22 @@ func (h *Hub) renamePeer(peer *Peer, newName string) {
 	oldName := peer.Name
 	oldKey := peerKey(oldName, peer.Direction)
 	newKey := peerKey(newName, peer.Direction)
-	if oldKey != newKey {
-		if existing, ok := h.peers[newKey]; ok && existing != peer {
-			existing.Close()
-		}
-		delete(h.peers, oldKey)
-		peer.Name = newName
-		h.peers[newKey] = peer
+	if oldKey == newKey {
+		h.mu.Unlock()
+		return
 	}
+	if existing, ok := h.peers[newKey]; ok && existing != peer {
+		existing.Close()
+	}
+	delete(h.peers, oldKey)
+	peer.Name = newName
+	h.peers[newKey] = peer
 	h.mu.Unlock()
+
+	// Bootstrap dials register under e.g. "peer-0"; the real name only
+	// arrives via Hello. Any redemption state was filed under the real
+	// name, so the second chance to adopt it is here.
+	h.redeemPending(peer, newKey)
 
 	// Also relabel in the known-peers map so future gossip dedup works.
 	h.knownMu.Lock()
@@ -1259,16 +1375,54 @@ func peerKey(name, direction string) string {
 }
 
 func (h *Hub) unregisterPeer(peer *Peer) {
-	peer.Cleanup()
 	peer.Close()
+
 	h.mu.Lock()
-	for key, p := range h.peers {
+	var key string
+	for k, p := range h.peers {
 		if p == peer {
-			delete(h.peers, key)
+			key = k
+			delete(h.peers, k)
 			break
 		}
 	}
 	h.mu.Unlock()
+
+	if key == "" {
+		// Peer was already removed — either redemption already adopted
+		// its state into a replacement, or this is the (now-removed)
+		// double cleanup call. Nothing else to do.
+		return
+	}
+
+	// Hold the peer's subscriber tables for a grace window so a quick
+	// reconnect can pick them back up without a sync round-trip.
+	h.schedulePendingCleanup(key, peer)
+}
+
+func (h *Hub) schedulePendingCleanup(key string, peer *Peer) {
+	h.pendingMu.Lock()
+	defer h.pendingMu.Unlock()
+	// If an older pending entry still sits at this key (shouldn't normally
+	// happen — registerPeer redeems on reconnect), retire it now.
+	if old, ok := h.pendingPeers[key]; ok && old.peer != peer {
+		old.timer.Stop()
+		old.peer.Cleanup()
+		delete(h.pendingPeers, key)
+	}
+	if _, ok := h.pendingPeers[key]; ok {
+		return
+	}
+	timer := time.AfterFunc(peerRedemptionWindow, func() {
+		h.pendingMu.Lock()
+		cur, ok := h.pendingPeers[key]
+		if ok && cur.peer == peer {
+			delete(h.pendingPeers, key)
+		}
+		h.pendingMu.Unlock()
+		peer.Cleanup()
+	})
+	h.pendingPeers[key] = &pendingPeer{peer: peer, timer: timer}
 }
 
 func (h *Hub) sendFullSync(peer *Peer) {
