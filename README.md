@@ -242,7 +242,18 @@ the core server. Run them alongside the server if needed.
 ./tetra-brew-echo         # echo/parrot service (set ECHO_TALKGROUP)
 ./tetra-brew-webradio     # webradio (ACELP encoder required)
 ./tetra-brew-dmrbridge    # BrandMeister DMR bridge (TG 91+)
+./tetra-brew-proxy        # bridge ISSI -> target ISSI duplex proxy
 ```
+
+`tetra-brew-proxy` registers as a virtual subscriber under `PROXY_BRIDGE_ISSI`
+and, on receiving an inbound private call to that ISSI, auto-accepts and dials
+`PROXY_TARGET_ISSI`, relaying voice and call-control between the two legs.
+The outbound leg uses the server's normal subscriber routing — if the target
+lives on a federated peer it transparently uses duplex federation routing,
+otherwise it stays local. Env vars: `PROXY_BRIDGE_ISSI`, `PROXY_TARGET_ISSI`,
+`PROXY_DIAL_TIMEOUT` (default `10s`), `PROXY_IDLE_TIMEOUT` (default `60s`),
+`PROXY_MAX_CONCURRENT` (default `4`). Reuses `BREW_CLIENT_*` for the
+websocket connection.
 
 By convention service bots should run on local TGs (1-9) so they don't
 create federation ping-pong with other servers running similar bots.
@@ -256,6 +267,7 @@ go build ./cmd/tetra-brew
 go build ./cmd/tetra-brew-webradio
 go build ./cmd/tetra-brew-echo
 go build ./cmd/tetra-brew-dmrbridge
+go build ./cmd/tetra-brew-proxy
 
 # ACELP encoder for webradio
 gcc -Icodec/ -Ofast codec/encoder_stdio.c codec/codec/*.c -o tetra-acelp-stdio
