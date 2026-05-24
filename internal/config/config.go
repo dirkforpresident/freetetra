@@ -200,6 +200,13 @@ type WebRadioConfig struct {
 	// Empty → no server (legacy behavior). When set, serves /api/webradio/status.
 	ListenAddr        string
 	TelemetryLogEvery time.Duration // periodic summary log cadence; default 30s
+
+	// Sources is the ordered failover list. Empty → [StreamURL] (legacy
+	// single-source compatibility). StallTimeout > 0 enables a watchdog
+	// that rotates to the next source if no frames have arrived for the
+	// given duration; 0 disables the watchdog.
+	Sources      []string
+	StallTimeout time.Duration
 }
 
 type ZelloConfig struct {
@@ -333,6 +340,8 @@ func LoadFromEnv() (Config, error) {
 			SilenceGating:    envBool("WEBRADIO_SILENCE_GATING", false),
 			ListenAddr:       env("WEBRADIO_LISTEN_ADDR", ""),
 			TelemetryLogEvery: envDuration("WEBRADIO_TELEMETRY_LOG_EVERY", 30*time.Second),
+			Sources:          envCSV("WEBRADIO_SOURCES"),
+			StallTimeout:     envDuration("WEBRADIO_STALL_TIMEOUT", 0),
 		},
 		Zello: ZelloConfig{
 			Enabled:          envBool("ZELLO_ENABLED", false),

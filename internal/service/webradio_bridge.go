@@ -25,6 +25,7 @@ type WebRadioBridge struct {
 	plane  InjectionPlane
 
 	telemetry *webradioTelemetry
+	rotator   *sourceRotator
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -33,8 +34,9 @@ type WebRadioBridge struct {
 }
 
 func NewWebRadioBridge(cfg config.Config, logger *log.Logger, plane InjectionPlane) (*WebRadioBridge, error) {
-	if strings.TrimSpace(cfg.WebRadio.StreamURL) == "" {
-		return nil, fmt.Errorf("WEBRADIO_STREAM_URL is required when WEBRADIO_ENABLED=true")
+	rotator := newSourceRotator(cfg.WebRadio)
+	if rotator.Len() == 0 {
+		return nil, fmt.Errorf("WEBRADIO_STREAM_URL or WEBRADIO_SOURCES must be set when WEBRADIO_ENABLED=true")
 	}
 	if cfg.WebRadio.Talkgroup == 0 {
 		return nil, fmt.Errorf("WEBRADIO_TALKGROUP must be > 0 when WEBRADIO_ENABLED=true")
@@ -50,6 +52,7 @@ func NewWebRadioBridge(cfg config.Config, logger *log.Logger, plane InjectionPla
 		logger:    logger,
 		plane:     plane,
 		telemetry: &webradioTelemetry{},
+		rotator:   rotator,
 	}, nil
 }
 
@@ -71,13 +74,15 @@ func (b *WebRadioBridge) Start(ctx context.Context) error {
 	b.mu.Unlock()
 
 	b.logger.Printf(
-		"webradio bridge enabled stream=%s tg=%d source=%d encoder=%s frame_size=%d reconnect=%s",
-		b.cfg.WebRadio.StreamURL,
+		"webradio bridge enabled sources=%d active=%s tg=%d source=%d encoder=%s frame_size=%d reconnect=%s stall_timeout=%s",
+		b.rotator.Len(),
+		b.rotator.Current(),
 		b.cfg.WebRadio.Talkgroup,
 		b.cfg.WebRadio.SourceISSI,
 		b.cfg.WebRadio.EncoderBin,
 		b.encoderFrameSize(),
 		b.reconnectDelay().String(),
+		b.cfg.WebRadio.StallTimeout.String(),
 	)
 
 	go b.runLoop(runCtx)
@@ -164,8 +169,18 @@ func (b *WebRadioBridge) runLoop(ctx context.Context) {
 		}
 
 		err := b.runSession(ctx)
+		stalled := errors.Is(err, errStallTimeout)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			b.logger.Printf("webradio session error: %v", err)
+		}
+
+		// On a stall, rotate to the next source without the usual reconnect
+		// delay — the current one is dead, give the next one a chance fast.
+		// Manual control via /api/webradio/skip in task 8 uses the same path.
+		if stalled && b.rotator.Len() > 1 {
+			next := b.rotator.Skip()
+			b.logger.Printf("webradio failover: stall → next source %s", next)
+			continue
 		}
 
 		select {
@@ -176,11 +191,53 @@ func (b *WebRadioBridge) runLoop(ctx context.Context) {
 	}
 }
 
+// watchStall closes the cancel function with errStallTimeout when no frame
+// has arrived for cfg.WebRadio.StallTimeout. lastFrameTime is read via the
+// pointer and atomicity isn't required — the watchdog only cares about
+// monotonic age, and runSession blocks on I/O between updates.
+func (b *WebRadioBridge) watchStall(ctx context.Context, lastFrameTime *time.Time, lastFrameMu *sync.Mutex, cancelWithCause func(error)) {
+	timeout := b.cfg.WebRadio.StallTimeout
+	if timeout <= 0 {
+		return
+	}
+	tick := timeout / 2
+	if tick < 500*time.Millisecond {
+		tick = 500 * time.Millisecond
+	}
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			lastFrameMu.Lock()
+			age := time.Since(*lastFrameTime)
+			lastFrameMu.Unlock()
+			if age > timeout {
+				b.logger.Printf("webradio stall watchdog: no frames for %.1fs (limit %s)", age.Seconds(), timeout)
+				cancelWithCause(errStallTimeout)
+				return
+			}
+		}
+	}
+}
+
 func (b *WebRadioBridge) runSession(ctx context.Context) error {
 	callID := uuid.New()
 
-	ffmpegCmd := exec.CommandContext(ctx, b.cfg.WebRadio.FFmpegBin, b.ffmpegArgs()...)
-	encoderCmd := exec.CommandContext(ctx, b.cfg.WebRadio.EncoderBin, b.encoderArgs()...)
+	// Wrap with WithCancelCause so the stall watchdog can communicate
+	// "this source died" upward without using a side channel. The cause is
+	// recovered below and turned into errStallTimeout for the outer loop.
+	sessCtx, cancelSession := context.WithCancelCause(ctx)
+	defer cancelSession(nil)
+
+	var lastFrameMu sync.Mutex
+	lastFrameTime := time.Now()
+	go b.watchStall(sessCtx, &lastFrameTime, &lastFrameMu, cancelSession)
+
+	ffmpegCmd := exec.CommandContext(sessCtx, b.cfg.WebRadio.FFmpegBin, b.ffmpegArgs()...)
+	encoderCmd := exec.CommandContext(sessCtx, b.cfg.WebRadio.EncoderBin, b.encoderArgs()...)
 
 	ffmpegOut, err := ffmpegCmd.StdoutPipe()
 	if err != nil {
@@ -223,8 +280,8 @@ func (b *WebRadioBridge) runSession(ctx context.Context) error {
 		copyErrCh <- copyErr
 	}()
 
-	activeCallID, callStarted, readErr := b.readEncoderFrames(ctx, callID, encoderOut)
-	if readErr != nil && ctx.Err() == nil {
+	activeCallID, callStarted, readErr := b.readEncoderFrames(sessCtx, callID, encoderOut, &lastFrameTime, &lastFrameMu)
+	if readErr != nil && sessCtx.Err() == nil {
 		if ffmpegCmd.Process != nil {
 			_ = ffmpegCmd.Process.Kill()
 		}
@@ -240,8 +297,14 @@ func (b *WebRadioBridge) runSession(ctx context.Context) error {
 		b.plane.ReleaseInjectedCall("webradio", activeCallID, b.cfg.WebRadio.ReleaseCause)
 	}
 
+	// Distinguish parent-cancel (Stop) from stall-cancel (watchdog). The
+	// parent ctx error wins because that's the user actually asking us to
+	// stop; a stall in flight when Stop fires is irrelevant.
 	if ctx.Err() != nil {
 		return context.Canceled
+	}
+	if cause := context.Cause(sessCtx); errors.Is(cause, errStallTimeout) {
+		return errStallTimeout
 	}
 
 	// Log detailed diagnostics when session fails
@@ -264,7 +327,7 @@ func (b *WebRadioBridge) runSession(ctx context.Context) error {
 	return nil
 }
 
-func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID, r io.Reader) (uuid.UUID, bool, error) {
+func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID, r io.Reader, lastFrameTime *time.Time, lastFrameMu *sync.Mutex) (uuid.UUID, bool, error) {
 	reader := bufio.NewReader(r)
 	frameSize := b.encoderFrameSize()
 	frame := make([]byte, frameSize)
@@ -273,7 +336,6 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 	activeCallID := uuid.Nil
 	callStarted := false
 	frameInCall := 0
-	lastFrameTime := time.Now()
 
 	for {
 		if ctx.Err() != nil {
@@ -287,17 +349,19 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 				}
 				return activeCallID, callStarted, nil
 			}
-			b.logger.Printf("webradio session %s: frame read failed after %v: %v", callID.String()[:8], time.Since(lastFrameTime), err)
+			lastFrameMu.Lock()
+			age := time.Since(*lastFrameTime)
+			lastFrameMu.Unlock()
+			b.logger.Printf("webradio session %s: frame read failed after %v: %v", callID.String()[:8], age, err)
 			return activeCallID, callStarted, err
 		}
 
-		// Monitor time between frames to detect stalls
+		// Stamp the shared lastFrameTime so the stall watchdog can see
+		// whether the source is still feeding us.
 		now := time.Now()
-		timeSinceLastFrame := now.Sub(lastFrameTime)
-		if timeSinceLastFrame > 5*time.Second {
-			b.logger.Printf("webradio session %s: frame stall detected (%.1fs since last frame)", callID.String()[:8], timeSinceLastFrame.Seconds())
-		}
-		lastFrameTime = now
+		lastFrameMu.Lock()
+		*lastFrameTime = now
+		lastFrameMu.Unlock()
 
 		ste, ready, err := normalizeRadioFrame(frame, &pendingCodec18)
 		if err != nil {
@@ -434,7 +498,7 @@ func (b *WebRadioBridge) ffmpegArgs() []string {
 		"-nostdin",
 		"-hide_banner",
 		"-loglevel", "error",
-		"-i", b.cfg.WebRadio.StreamURL,
+		"-i", b.rotator.Current(),
 	}
 	if chain := BuildWebRadioFilterChain(b.cfg.WebRadio); chain != "" {
 		args = append(args, "-af", chain)
