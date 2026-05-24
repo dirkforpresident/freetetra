@@ -75,7 +75,10 @@ services:
     environment:
       DMRBRIDGE_FT_BASE_URL: http://freetetra:8101
       DMRBRIDGE_BM_BASE_URL: https://core.tetrapack.online:443
-      DMRBRIDGE_TGS: "91,262,2621,2622,9990"
+      # Default whitelist: Worldwide + DL-cluster + Echo + alle 16 DL-Bundeslaender
+      # + Hamburg-City (26221) + CCC Chaos Wellen (26223) + Hamburg C4FM/YSF Bridge (26421).
+      # Override im .env.dmrbridge wenn du andere TGs willst.
+      DMRBRIDGE_TGS: "91,262,2621,2622,2623,2624,9990,26201,26202,26203,26204,26205,26206,26207,26208,26209,26210,26211,26212,26213,26214,26215,26216,26221,26223,26421"
       DMRBRIDGE_REQUIRE_RADIOID: "true"
       RADIOID_USERS_FILE: /app/data/users.txt
     volumes:
