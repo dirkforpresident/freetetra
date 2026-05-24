@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/freetetra/server/internal/config"
@@ -67,5 +68,22 @@ func TestSourceRotator_EmptyConfigYieldsEmptyRotator(t *testing.T) {
 	}
 	if got := r.Current(); got != "" {
 		t.Errorf("Current on empty rotator = %q, want \"\"", got)
+	}
+}
+
+func TestSentinels_AreDistinctButComparableViaErrorsIs(t *testing.T) {
+	// runLoop differentiates Stall / Skip / Reload via errors.Is dispatches.
+	// Lock the wiring with explicit assertions so an accidental aliasing
+	// (e.g. someone defining errManualSkip = errStallTimeout) is caught.
+	if errStallTimeout.Error() == errManualSkip.Error() ||
+		errStallTimeout.Error() == errManualReload.Error() ||
+		errManualSkip.Error() == errManualReload.Error() {
+		t.Fatal("sentinels must have distinct error strings")
+	}
+	if errors.Is(errStallTimeout, errManualSkip) {
+		t.Error("errStallTimeout must not match errManualSkip")
+	}
+	if errors.Is(errManualReload, errStallTimeout) {
+		t.Error("errManualReload must not match errStallTimeout")
 	}
 }

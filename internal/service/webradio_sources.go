@@ -12,7 +12,11 @@ import (
 // URL because no frames have arrived for cfg.WebRadio.StallTimeout. The
 // runLoop checks for this with errors.Is and rotates without applying the
 // usual reconnect delay — failover should be snappy.
-var errStallTimeout = errors.New("webradio: source stalled")
+var (
+	errStallTimeout = errors.New("webradio: source stalled")
+	errManualSkip   = errors.New("webradio: manual skip")
+	errManualReload = errors.New("webradio: manual reload")
+)
 
 // sourceRotator tracks which entry in the failover list is currently the
 // active one. Skip() advances; Current() reads. The struct is safe for
