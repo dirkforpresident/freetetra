@@ -140,9 +140,24 @@ func (h *Hub) UseSharedPortRPC() {
 
 // NewGRPCServer returns a gRPC server with the federation service registered.
 func (h *Hub) NewGRPCServer() *grpc.Server {
-	server := grpc.NewServer()
+	server := grpc.NewServer(federationServerOptions()...)
 	federationv2pb.RegisterFederationTransportV2Server(server, h)
 	return server
+}
+
+// federationServerOptions bumps the HTTP/2 initial windows from the gRPC
+// default 64 KB to 1 MB on each direction. Anti-entropy bursts ship dozens
+// of small control messages back-to-back at peer-connect time; the default
+// window fills before the peer's first WINDOW_UPDATE arrives, stalling
+// writeLoop and filling the 256-slot Go send channel within ~32 ms (the
+// "send buffer full" pattern we saw on every fresh handshake). 1 MB gives
+// roughly 2000 messages of headroom before backpressure shows.
+func federationServerOptions() []grpc.ServerOption {
+	const window = 1 << 20
+	return []grpc.ServerOption{
+		grpc.InitialWindowSize(window),
+		grpc.InitialConnWindowSize(window),
+	}
 }
 
 // Start connects to all configured peers and begins the federation loop.
@@ -151,6 +166,8 @@ func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
 	if h.serveStandaloneRPC {
 		go h.serveRPC(ctx)
 	}
+
+	go h.statsLoop(ctx)
 
 	// Add configured peers to known list
 	for _, pc := range peerConfigs {
@@ -161,13 +178,55 @@ func (h *Hub) Start(ctx context.Context, peerConfigs []PeerConfig) {
 	}
 }
 
+// statsLoop emits a one-line snapshot of every peer's send-buffer state
+// every 30s. The line is "<name>/<dir> q=L/C sent=cN/vM dropped=cD/vV"
+// where q is the Go-channel occupancy, sent/dropped are lifetime totals
+// for control vs voice frames. The window is the same as the anti-entropy
+// cadence, which is the main burst source — line up the two in the log to
+// see whether the burst was fully absorbed or whether some peer's queue
+// stayed high afterwards.
+func (h *Hub) statsLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.logPeerStats()
+		}
+	}
+}
+
+func (h *Hub) logPeerStats() {
+	h.mu.RLock()
+	if len(h.peers) == 0 {
+		h.mu.RUnlock()
+		return
+	}
+	parts := make([]string, 0, len(h.peers))
+	for _, p := range h.peers {
+		bs := p.BufferStats()
+		dir := "out"
+		if p.Direction == "incoming" {
+			dir = "in"
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s q=%d/%d sent=c%d/v%d dropped=c%d/v%d",
+			p.Name, dir, bs.QueueLen, bs.QueueCap,
+			bs.SentControl, bs.SentVoice,
+			bs.DroppedControl, bs.DroppedVoice))
+	}
+	h.mu.RUnlock()
+	h.logger.Printf("federation: peer stats: %s", strings.Join(parts, " | "))
+}
+
 func (h *Hub) serveRPC(ctx context.Context) {
 	lis, err := net.Listen("tcp", h.rpcListen)
 	if err != nil {
 		h.logger.Printf("federation: RPC listen failed on %s: %v", h.rpcListen, err)
 		return
 	}
-	server := grpc.NewServer()
+	server := grpc.NewServer(federationServerOptions()...)
 	federationv2pb.RegisterFederationTransportV2Server(server, h)
 	h.logger.Printf("federation: protobuf RPC listening on %s", h.rpcListen)
 
@@ -223,7 +282,11 @@ func (h *Hub) maintainOutgoingPeer(ctx context.Context, pc PeerConfig) {
 		} else {
 			creds = insecure.NewCredentials()
 		}
-		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
+		conn, err := grpc.NewClient(target,
+			grpc.WithTransportCredentials(creds),
+			grpc.WithInitialWindowSize(1<<20),
+			grpc.WithInitialConnWindowSize(1<<20),
+		)
 		if err != nil {
 			h.logger.Printf("federation: failed to connect to %s: %v (retry in %s)", pc.Name, err, delay)
 			if !waitBackoff(ctx, &delay, baseDelay, maxDelay) {
@@ -749,7 +812,6 @@ func (h *Hub) handleStationUpdate(peer *Peer, ctrl *federationv2pb.Control, su *
 	}
 }
 
-
 func (h *Hub) handleVoiceFrame(peer *Peer, callUUID string, frameData []byte) {
 	if len(callUUID) != 36 {
 		return
@@ -1004,6 +1066,7 @@ func (h *Hub) PeerSnapshots() []PeerSnapshot {
 			Direction: p.Direction,
 			ISSIs:     p.ISSIs(),
 			GSSIs:     p.GSSIs(),
+			Buffer:    p.BufferStats(),
 		})
 	}
 	return out
@@ -1015,6 +1078,7 @@ type PeerSnapshot struct {
 	Direction string              `json:"direction"`
 	ISSIs     []uint32            `json:"issis"`
 	GSSIs     map[uint32][]uint32 `json:"gssis"`
+	Buffer    PeerBufferStats     `json:"buffer"`
 }
 
 // ==================================================================
