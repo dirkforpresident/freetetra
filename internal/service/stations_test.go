@@ -171,6 +171,121 @@ func TestISSIConflictNewerWins(t *testing.T) {
 	}
 }
 
+func TestByCallsign(t *testing.T) {
+	s := testStore(t)
+	if _, ok := s.ByCallsign("DO1AAA"); ok {
+		t.Fatalf("ByCallsign on empty store should miss")
+	}
+	if _, err := s.Upsert(sampleStation("a-1", "DO1AAA")); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, ok := s.ByCallsign("do1aaa") // lowercase input
+	if !ok || got.StationID != "a-1" {
+		t.Fatalf("ByCallsign(do1aaa) = %+v ok=%v; want a-1", got, ok)
+	}
+	if _, err := s.Delete("a-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, ok := s.ByCallsign("DO1AAA"); ok {
+		t.Fatalf("ByCallsign should not return tombstoned rows")
+	}
+}
+
+func TestLinkOrCreate_ISSIHit(t *testing.T) {
+	s := testStore(t)
+	in := sampleStation("a-1", "DO1AAA")
+	in.OwnedISSIs = []uint32{1001}
+	if _, err := s.Upsert(in); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	st, ok := s.LinkOrCreate(1001, "ignored", "bluestation", false)
+	if !ok || st.StationID != "a-1" {
+		t.Fatalf("LinkOrCreate(1001) = %+v ok=%v; want a-1", st, ok)
+	}
+}
+
+func TestLinkOrCreate_CallsignFallback(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.Upsert(sampleStation("a-1", "DO1AAA")); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	st, ok := s.LinkOrCreate(1001, "DO1AAA", "bluestation", false)
+	if !ok || st.StationID != "a-1" {
+		t.Fatalf("LinkOrCreate(1001, DO1AAA) = %+v ok=%v; want a-1 extended", st, ok)
+	}
+	if len(st.OwnedISSIs) != 1 || st.OwnedISSIs[0] != 1001 {
+		t.Fatalf("expected OwnedISSIs=[1001], got %v", st.OwnedISSIs)
+	}
+	if got, ok := s.ByISSI(1001); !ok || got.StationID != "a-1" {
+		t.Fatalf("ByISSI after callsign-fallback link missed: %+v ok=%v", got, ok)
+	}
+}
+
+func TestLinkOrCreate_AutoCreateOn(t *testing.T) {
+	s := testStore(t)
+	st, ok := s.LinkOrCreate(1001, "DO1NEW", "bluestation", true)
+	if !ok {
+		t.Fatalf("LinkOrCreate with autoCreate=true returned ok=false")
+	}
+	if st.Callsign != "DO1NEW" || st.Type != "bluestation" || len(st.OwnedISSIs) != 1 {
+		t.Fatalf("stub looks wrong: %+v", st)
+	}
+	if _, ok := s.ByISSI(1001); !ok {
+		t.Fatalf("auto-created station not indexed by ISSI")
+	}
+}
+
+func TestLinkOrCreate_AutoCreateOff(t *testing.T) {
+	s := testStore(t)
+	if _, ok := s.LinkOrCreate(1001, "DO1NEW", "bluestation", false); ok {
+		t.Fatalf("LinkOrCreate with autoCreate=false unexpectedly succeeded")
+	}
+	if len(s.All()) != 0 {
+		t.Fatalf("expected zero stations after no-op, got %d", len(s.All()))
+	}
+}
+
+func TestLinkOrCreate_AutoCreateUsesISSIWhenNoCallsign(t *testing.T) {
+	s := testStore(t)
+	st, ok := s.LinkOrCreate(1001, "", "bluestation", true)
+	if !ok {
+		t.Fatalf("LinkOrCreate(empty callsign) ok=false")
+	}
+	if st.Callsign != "1001" {
+		t.Fatalf("callsign fallback to ISSI string failed: %+v", st)
+	}
+}
+
+func TestBumpLastSeen(t *testing.T) {
+	s := testStore(t)
+	in := sampleStation("a-1", "DO1AAA")
+	in.LastSeenUnix = time.Now().Add(-time.Hour).Unix()
+	if _, err := s.Upsert(in); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	before := s.items["a-1"].LastSeenUnix
+	s.bumpLastSeen("a-1")
+	after := s.items["a-1"].LastSeenUnix
+	if after <= before {
+		t.Fatalf("bumpLastSeen did not advance LastSeenUnix (before=%d after=%d)", before, after)
+	}
+}
+
+func TestBumpLastSeen_IgnoresTombstone(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.Upsert(sampleStation("a-1", "DO1AAA")); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := s.Delete("a-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	tombDeletedAt := s.items["a-1"].DeletedUnix
+	s.bumpLastSeen("a-1")
+	if s.items["a-1"].DeletedUnix != tombDeletedAt {
+		t.Fatalf("bumpLastSeen on tombstone should not change DeletedUnix")
+	}
+}
+
 func TestUpsertReindexOnISSIChange(t *testing.T) {
 	s := testStore(t)
 	in := sampleStation("a-1", "DO1AAA")

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -227,12 +229,42 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) OnConnect(client *brew.Client) {
-	s.logger.Printf("session=%s attached", client.ID)
-	s.recordActivity("connect", fmt.Sprintf("session=%s remote=%s", client.ID, client.Remote), map[string]any{
-		"session": client.ID,
-		"remote":  client.Remote,
+	s.logger.Printf("session=%s attached username=%s", client.ID, client.Username)
+	s.recordActivity("connect", fmt.Sprintf("session=%s remote=%s username=%s", client.ID, client.Remote, client.Username), map[string]any{
+		"session":  client.ID,
+		"remote":   client.Remote,
+		"username": client.Username,
 	})
 	s.broadcastAttachmentControl("connect", client)
+	s.linkBrewSessionToStation(client)
+}
+
+// linkBrewSessionToStation resolves the connecting Brew session to a Station
+// via ByISSI(username). If a callsign can be derived through RadioID, the
+// LinkOrCreate helper also falls back to extending a same-callsign station's
+// OwnedISSIs or (when STATION_AUTO_CREATE=true) creating a stub. Errors are
+// logged but never block the connection.
+func (s *Service) linkBrewSessionToStation(client *brew.Client) {
+	if s.stationStore == nil || client == nil || strings.TrimSpace(client.Username) == "" {
+		return
+	}
+	issi64, err := strconv.ParseUint(strings.TrimSpace(client.Username), 10, 32)
+	if err != nil || issi64 == 0 {
+		// Static admin auth or non-numeric username — nothing to join.
+		return
+	}
+	issi := uint32(issi64)
+	callsign := ""
+	if s.radioIDAuth != nil {
+		if cs, ok := s.radioIDAuth.Verify(issi); ok {
+			callsign = cs
+		}
+	}
+	st, ok := s.stationStore.LinkOrCreate(issi, callsign, "bluestation", s.cfg.Station.AutoCreate)
+	if !ok {
+		return
+	}
+	s.logger.Printf("session=%s linked to station %s (%s, type=%s)", client.ID, st.StationID, st.Callsign, st.Type)
 }
 
 func (s *Service) OnDisconnect(client *brew.Client) {

@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Station is a user-declared FreeTetra station (hotspot / tmo_site / bluestation).
@@ -365,6 +368,102 @@ func (s *stationStore) ByISSI(issi uint32) (Station, bool) {
 	return *st, true
 }
 
+// ByCallsign returns the live station with the matching callsign. Comparison
+// is case-insensitive; Upsert already uppercases stored callsigns so the
+// equality check is effectively cheap. If two stations share a callsign the
+// most-recently-updated one wins (stable iteration order is not guaranteed).
+func (s *stationStore) ByCallsign(cs string) (Station, bool) {
+	cs = strings.ToUpper(strings.TrimSpace(cs))
+	if cs == "" {
+		return Station{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best *Station
+	for _, st := range s.items {
+		if st.DeletedUnix > 0 || st.Callsign != cs {
+			continue
+		}
+		if best == nil || st.LastSeenUnix > best.LastSeenUnix {
+			best = st
+		}
+	}
+	if best == nil {
+		return Station{}, false
+	}
+	return *best, true
+}
+
+// LinkOrCreate associates a live identity (issi + optional callsign) with a
+// Station. Resolution order:
+//  1. ByISSI(issi) — exact reverse-index hit.
+//  2. ByCallsign(callsign) — extend that station's OwnedISSIs with this issi.
+//  3. autoCreate=true — Upsert a fresh stub Station of the given type.
+//  4. otherwise — return false; caller decides what to do.
+//
+// The returned Station is the final live row (post-Upsert if a write happened).
+// All write paths go through Upsert, which federates and persists.
+func (s *stationStore) LinkOrCreate(issi uint32, callsign, stationType string, autoCreate bool) (Station, bool) {
+	if issi == 0 {
+		return Station{}, false
+	}
+	if st, ok := s.ByISSI(issi); ok {
+		return st, true
+	}
+	if st, ok := s.ByCallsign(callsign); ok {
+		extended := append([]uint32(nil), st.OwnedISSIs...)
+		extended = append(extended, issi)
+		st.OwnedISSIs = extended
+		saved, err := s.Upsert(st)
+		if err != nil {
+			s.logger.Printf("stations: LinkOrCreate extend %s with ISSI %d failed: %v", st.StationID, issi, err)
+			return Station{}, false
+		}
+		return *saved, true
+	}
+	if !autoCreate {
+		return Station{}, false
+	}
+	cs := strings.ToUpper(strings.TrimSpace(callsign))
+	if cs == "" {
+		cs = strconv.FormatUint(uint64(issi), 10)
+	}
+	stub := Station{
+		StationID:  uuid.NewString(),
+		Callsign:   cs,
+		Type:       stationType,
+		OwnedISSIs: []uint32{issi},
+	}
+	saved, err := s.Upsert(stub)
+	if err != nil {
+		s.logger.Printf("stations: LinkOrCreate auto-create for ISSI %d failed: %v", issi, err)
+		return Station{}, false
+	}
+	s.logger.Printf("stations: auto-created %s (callsign=%s, issi=%d, type=%s)",
+		saved.StationID, saved.Callsign, issi, stationType)
+	return *saved, true
+}
+
+// bumpLastSeen marks the station as live now without going through the full
+// Upsert validation+federation path. Used by the high-frequency liveness
+// updaters (telemetry MS events, TMO heartbeats) that don't change static
+// fields. Tombstoned rows are not revived. Persisted on a best-effort schedule
+// — we save inline since the bump is rare relative to disk IO budget.
+func (s *stationStore) bumpLastSeen(stationID string) {
+	if stationID == "" {
+		return
+	}
+	now := time.Now().Unix()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.items[stationID]
+	if !ok || st.DeletedUnix > 0 {
+		return
+	}
+	st.LastSeenUnix = now
+	s.save()
+}
+
 // --- HTTP handlers ---
 
 func (s *Service) handleStationPush(w http.ResponseWriter, r *http.Request) {
@@ -429,13 +528,62 @@ func (s *Service) handleStationDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleStationsList(w http.ResponseWriter, r *http.Request) {
 	type out struct {
 		Station
-		Online bool `json:"online"`
+		Online              bool     `json:"online"`
+		LiveBrewSessionID   string   `json:"live_brew_session_id,omitempty"`
+		LiveBrewSubscribers []uint32 `json:"live_brew_subscribers,omitempty"`
+		LiveTelemetry       bool     `json:"live_telemetry,omitempty"`
+		LiveTelemetrySubs   []uint32 `json:"live_telemetry_subscribers,omitempty"`
 	}
 	var list []out
 	if s.stationStore != nil {
 		window := s.stationStore.OnlineWindow()
+		// Build per-ISSI lookup tables for the live join. We index brew
+		// clients by their authenticated Username (parsed as ISSI) and
+		// telemetry clients by their StationID — telemetry already resolved
+		// itself on connect via LinkOrCreate.
+		type brewLive struct {
+			sessionID string
+			subs      []uint32
+		}
+		brewByISSI := map[uint32]brewLive{}
+		for _, c := range s.server.SnapshotClients() {
+			if c.Username == "" {
+				continue
+			}
+			issi64, err := strconv.ParseUint(strings.TrimSpace(c.Username), 10, 32)
+			if err != nil || issi64 == 0 {
+				continue
+			}
+			subs := make([]uint32, 0, len(c.Subscribers))
+			for _, sub := range c.Subscribers {
+				subs = append(subs, sub.Number)
+			}
+			brewByISSI[uint32(issi64)] = brewLive{sessionID: c.ID, subs: subs}
+		}
+		telemetryByStation := map[string][]uint32{}
+		if s.telemetry != nil {
+			for _, t := range s.telemetry.SnapshotForJoin() {
+				if t.StationID == "" {
+					continue
+				}
+				telemetryByStation[t.StationID] = append(telemetryByStation[t.StationID], t.Subscribers...)
+			}
+		}
+
 		for _, st := range s.stationStore.All() {
-			list = append(list, out{Station: st, Online: st.Online(window)})
+			row := out{Station: st, Online: st.Online(window)}
+			for _, issi := range st.OwnedISSIs {
+				if bl, ok := brewByISSI[issi]; ok {
+					row.LiveBrewSessionID = bl.sessionID
+					row.LiveBrewSubscribers = bl.subs
+					break
+				}
+			}
+			if subs, ok := telemetryByStation[st.StationID]; ok && len(subs) > 0 {
+				row.LiveTelemetry = true
+				row.LiveTelemetrySubs = subs
+			}
+			list = append(list, row)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

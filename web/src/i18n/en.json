@@ -33,6 +33,8 @@
   "admin.station.owned_issis": "Owned ISSIs",
   "admin.station.owned_issis_hint": "Comma-separated, e.g. 1001, 1002",
   "admin.station.confirm_delete": "Delete station {callsign}? Tombstone is broadcast to federation peers.",
+  "admin.station.live_brew_tip": "Brew session connected to this server; number is currently-registered MS count",
+  "admin.station.live_telemetry_tip": "Telemetry feed connected to this server; number is currently-registered MS count",
   "admin.empty.activity": "No activity",
   "admin.empty.peers": "No peers connected",
   "admin.empty.positions": "No positions received",

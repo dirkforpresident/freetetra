@@ -33,6 +33,8 @@
   "admin.station.owned_issis": "Eigene ISSIs",
   "admin.station.owned_issis_hint": "Kommagetrennt, z.B. 1001, 1002",
   "admin.station.confirm_delete": "Station {callsign} loeschen? Der Tombstone wird an Federation-Peers gesendet.",
+  "admin.station.live_brew_tip": "Brew-Session ist auf diesem Server verbunden; Zahl = aktuell eingebuchte MS",
+  "admin.station.live_telemetry_tip": "Telemetry-Feed ist auf diesem Server verbunden; Zahl = aktuell eingebuchte MS",
   "admin.empty.activity": "Keine Aktivitaet",
   "admin.empty.peers": "Keine Peers verbunden",
   "admin.empty.positions": "Keine Positionen empfangen",

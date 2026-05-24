@@ -65,6 +65,14 @@ export interface Station {
   owned_issis?: number[];
   origin?: string;
   deleted?: number;
+  // Query-time live joins. Set when this station has an active Brew session
+  // and/or a connected telemetry feed bound to it on THIS server (not
+  // federated). Empty/undefined for federated stations that aren't connected
+  // here, which is correct semantics.
+  live_brew_session_id?: string;
+  live_brew_subscribers?: number[];
+  live_telemetry?: boolean;
+  live_telemetry_subscribers?: number[];
 }
 
 export interface StationsResponse {

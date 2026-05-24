@@ -342,6 +342,20 @@ async function deleteStation(st: Station) {
                 <td>
                   <span class="badge badge-green">{{ st.callsign }}</span>
                   <span v-if="st.origin" class="badge badge-blue small mono">{{ st.origin }}</span>
+                  <span
+                    v-if="st.live_brew_session_id"
+                    class="badge badge-orange small mono"
+                    :title="t('admin.station.live_brew_tip')"
+                  >
+                    BREW · {{ (st.live_brew_subscribers ?? []).length }}
+                  </span>
+                  <span
+                    v-if="st.live_telemetry"
+                    class="badge badge-blue small mono"
+                    :title="t('admin.station.live_telemetry_tip')"
+                  >
+                    TLM · {{ (st.live_telemetry_subscribers ?? []).length }}
+                  </span>
                   <span v-if="st.notes" class="notes"> — {{ st.notes }}</span>
                 </td>
                 <td>
