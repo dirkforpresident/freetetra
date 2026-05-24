@@ -15,11 +15,17 @@ import (
 
 // ProxyPlane is the narrow surface of BrewModulePlane that ProxyBridge needs.
 // Kept small so tests can supply a fake.
+//
+// SendSetupRequest / SendConnectRequest take a full CircularCallPayload so the
+// proxy can mirror inbound call-mode flags (Duplex, Method, Service,
+// Communication, Priority) onto the outbound leg. A naive (source, dest)-only
+// API would default everything to zero — making the outbound leg simplex even
+// when the inbound caller dialed duplex.
 type ProxyPlane interface {
-	SendSetupRequest(callID uuid.UUID, source, dest uint32) bool
+	SendSetupRequest(callID uuid.UUID, payload brew.CircularCallPayload) bool
 	SendSetupAccept(callID uuid.UUID) bool
 	SendSetupReject(callID uuid.UUID, cause uint8) bool
-	SendConnectRequest(callID uuid.UUID, source, dest uint32) bool
+	SendConnectRequest(callID uuid.UUID, payload brew.CircularCallPayload) bool
 	SendCallRelease(callID uuid.UUID, cause uint8) bool
 	InjectedVoiceFrame(origin string, callID uuid.UUID, data []byte)
 }
@@ -44,6 +50,11 @@ type proxySession struct {
 	state          proxyState
 	startedAt      time.Time
 	lastFrameAt    time.Time
+	// callMode captures the inbound SetupRequest's call-mode flags
+	// (Duplex, Method, Service, Communication, Priority) so the outbound
+	// leg's SetupRequest + ConnectRequest mirror them. Source/Destination
+	// are NOT taken from here — they're substituted with bridge/target.
+	callMode brew.CircularCallPayload
 }
 
 // ProxyBridge auto-accepts inbound private calls to a bridge ISSI and dials
@@ -219,21 +230,42 @@ func (b *ProxyBridge) handleInboundSetup(inboundCallID uuid.UUID, p brew.Circula
 		state:          proxyStateDialing,
 		startedAt:      now,
 		lastFrameAt:    now,
+		callMode:       p,
 	}
 	b.sessions[inboundCallID] = s
 	b.sessions[outboundCallID] = s
 	b.mu.Unlock()
 
 	b.logger.Printf(
-		"proxy inbound setup caller=%d bridge_issi=%d inbound_call=%s outbound_call=%s target_issi=%d",
+		"proxy inbound setup caller=%d bridge_issi=%d inbound_call=%s outbound_call=%s target_issi=%d duplex=%d",
 		p.Source,
 		b.bridgeISSI,
 		inboundCallID.String(),
 		outboundCallID.String(),
 		b.targetISSI,
+		p.Duplex,
 	)
 	b.plane.SendSetupAccept(inboundCallID)
-	b.plane.SendSetupRequest(outboundCallID, b.bridgeISSI, b.targetISSI)
+	b.plane.SendSetupRequest(outboundCallID, b.outboundPayload(s))
+}
+
+// outboundPayload returns the CircularCallPayload to use for outbound
+// SetupRequest / ConnectRequest. It mirrors the inbound call-mode flags
+// (Duplex, Method, Service, Communication, Priority) but substitutes
+// bridge-as-source / target-as-destination. Number / Grant / Permission /
+// Timeout / Ownership / Queued reset to zero — they're inbound-only
+// concepts and not meaningful to forward.
+func (b *ProxyBridge) outboundPayload(s *proxySession) brew.CircularCallPayload {
+	return brew.CircularCallPayload{
+		Source:        b.bridgeISSI,
+		Destination:   b.targetISSI,
+		Priority:      s.callMode.Priority,
+		Service:       s.callMode.Service,
+		Mode:          s.callMode.Mode,
+		Duplex:        s.callMode.Duplex,
+		Method:        s.callMode.Method,
+		Communication: s.callMode.Communication,
+	}
 }
 
 func (b *ProxyBridge) handleOutboundAccept(callID uuid.UUID) {
@@ -251,6 +283,7 @@ func (b *ProxyBridge) handleOutboundAccept(callID uuid.UUID) {
 	s.lastFrameAt = b.now()
 	inbound := s.inboundCallID
 	outbound := s.outboundCallID
+	payload := b.outboundPayload(s)
 	b.mu.Unlock()
 
 	b.logger.Printf(
@@ -258,7 +291,7 @@ func (b *ProxyBridge) handleOutboundAccept(callID uuid.UUID) {
 		inbound.String(),
 		outbound.String(),
 	)
-	b.plane.SendConnectRequest(outbound, b.bridgeISSI, b.targetISSI)
+	b.plane.SendConnectRequest(outbound, payload)
 }
 
 func (b *ProxyBridge) handleLegFailure(callID uuid.UUID, cause uint8, reason string) {

@@ -19,6 +19,7 @@ type fakeEvent struct {
 	callID  uuid.UUID
 	source  uint32
 	dest    uint32
+	duplex  uint8
 	cause   uint8
 	data    []byte
 }
@@ -28,10 +29,16 @@ type fakeProxyPlane struct {
 	events []fakeEvent
 }
 
-func (f *fakeProxyPlane) SendSetupRequest(callID uuid.UUID, source, dest uint32) bool {
+func (f *fakeProxyPlane) SendSetupRequest(callID uuid.UUID, p brew.CircularCallPayload) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.events = append(f.events, fakeEvent{kind: "setup-req", callID: callID, source: source, dest: dest})
+	f.events = append(f.events, fakeEvent{
+		kind:   "setup-req",
+		callID: callID,
+		source: p.Source,
+		dest:   p.Destination,
+		duplex: p.Duplex,
+	})
 	return true
 }
 
@@ -49,10 +56,16 @@ func (f *fakeProxyPlane) SendSetupReject(callID uuid.UUID, cause uint8) bool {
 	return true
 }
 
-func (f *fakeProxyPlane) SendConnectRequest(callID uuid.UUID, source, dest uint32) bool {
+func (f *fakeProxyPlane) SendConnectRequest(callID uuid.UUID, p brew.CircularCallPayload) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.events = append(f.events, fakeEvent{kind: "connect-req", callID: callID, source: source, dest: dest})
+	f.events = append(f.events, fakeEvent{
+		kind:   "connect-req",
+		callID: callID,
+		source: p.Source,
+		dest:   p.Destination,
+		duplex: p.Duplex,
+	})
 	return true
 }
 
@@ -113,7 +126,7 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	b.OnBrewCallControl(&brew.CallControlMessage{
 		CallState:  brew.CallStateSetupRequest,
 		Identifier: inboundCallID,
-		Payload:    brew.CircularCallPayload{Source: 1001, Destination: 999},
+		Payload:    brew.CircularCallPayload{Source: 1001, Destination: 999, Duplex: 1},
 	})
 
 	accepts := plane.findKind("setup-accept")
@@ -128,6 +141,9 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	if setupReqs[0].source != 999 || setupReqs[0].dest != 1002 {
 		t.Fatalf("outbound SetupRequest src/dst: src=%d dst=%d", setupReqs[0].source, setupReqs[0].dest)
 	}
+	if setupReqs[0].duplex != 1 {
+		t.Fatalf("outbound SetupRequest duplex flag not mirrored: got %d want 1", setupReqs[0].duplex)
+	}
 	if outboundCallID == inboundCallID {
 		t.Fatalf("outbound and inbound call IDs collide")
 	}
@@ -141,6 +157,9 @@ func TestProxyBridge_HappyPath(t *testing.T) {
 	connects := plane.findKind("connect-req")
 	if len(connects) != 1 || connects[0].callID != outboundCallID || connects[0].source != 999 || connects[0].dest != 1002 {
 		t.Fatalf("expected ConnectRequest on outbound 999->1002, got %#v", connects)
+	}
+	if connects[0].duplex != 1 {
+		t.Fatalf("outbound ConnectRequest duplex flag not mirrored: got %d want 1", connects[0].duplex)
 	}
 
 	// Voice on inbound -> relayed to outbound.
