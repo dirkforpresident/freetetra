@@ -474,6 +474,9 @@ func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, 
 }
 
 // NotifyStationUpdate broadcasted einen BlueStation-Heartbeat an alle Peers.
+// st.Origin is forwarded as ctrl.Origin so anti-entropy rebroadcasts from a
+// relay don't re-attribute a federated station to the relay. Empty Origin
+// means "ours" — the hub stamps its own serverName.
 func (fb *federationBridge) NotifyStationUpdate(st *Station) {
 	if fb.hub == nil || st == nil {
 		return
@@ -488,7 +491,7 @@ func (fb *federationBridge) NotifyStationUpdate(st *Station) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return
 	}
-	fb.hub.BroadcastStation(m)
+	fb.hub.BroadcastStation(st.Origin, m)
 }
 
 // NotifyCallStart notifies peers about a local group call start.

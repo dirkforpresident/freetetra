@@ -1040,14 +1040,22 @@ func (h *Hub) BroadcastCallStart(callUUID string, sourceISSI, destGSSI uint32, p
 
 // BroadcastStation sendet einen BlueStation-Heartbeat an alle Peers
 // (Stations-Federation). Damit zeigen alle Server die gleiche Station-Liste.
-func (h *Hub) BroadcastStation(station map[string]any) {
+//
+// `origin` is the originating server name to stamp on ctrl.Origin. Pass "" for
+// a locally-owned station; the hub falls back to its own serverName. For a
+// relayed/anti-entropy broadcast, pass the station's known origin so the
+// receiver does not re-attribute it to us.
+func (h *Hub) BroadcastStation(origin string, station map[string]any) {
 	st, err := structpb.NewStruct(station)
 	if err != nil {
 		h.logger.Printf("federation: cannot encode station map: %v", err)
 		return
 	}
+	if origin == "" {
+		origin = h.serverName
+	}
 	ctrl := &federationv2pb.Control{
-		Origin: h.serverName,
+		Origin: origin,
 		Payload: &federationv2pb.Control_StationUpdate{
 			StationUpdate: &federationv2pb.StationUpdate{Station: st},
 		},
