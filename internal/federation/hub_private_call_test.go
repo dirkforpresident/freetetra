@@ -86,7 +86,7 @@ func attachPeer(t *testing.T, h *Hub, name string, issis ...uint32) *fakeStream 
 	stream := newFakeStream()
 	peer := newPeer(name, "outgoing", stream, stream.cancel, log.New(io.Discard, "", 0))
 	for _, i := range issis {
-		peer.RegisterISSI(i)
+		peer.RegisterISSI(i, name)
 	}
 	go peer.writeLoop()
 	h.registerPeer(peer)

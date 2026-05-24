@@ -18,8 +18,12 @@ type Peer struct {
 	stream rpcStream
 	cancel context.CancelFunc
 
-	// Remote subscriber state
-	issis            map[uint32]bool            // ISSIs registered on this peer
+	// Remote subscriber state. issis maps each ISSI registered on this peer
+	// to its origin — the server where the subscriber is physically attached.
+	// For ISSIs this peer relayed for someone else (multi-hop federation),
+	// origin is the original sender's name from Control.origin; for ISSIs
+	// this peer owns directly, origin == peer.Name.
+	issis            map[uint32]string          // ISSI -> origin server name
 	gssiAffiliations map[uint32]map[uint32]bool // GSSI -> set of ISSIs
 
 	send   chan *federationv2pb.StreamFrame
@@ -79,7 +83,7 @@ func newPeer(name, direction string, stream rpcStream, cancel context.CancelFunc
 		Direction:        direction,
 		stream:           stream,
 		cancel:           cancel,
-		issis:            make(map[uint32]bool),
+		issis:            make(map[uint32]string),
 		gssiAffiliations: make(map[uint32]map[uint32]bool),
 		send:             make(chan *federationv2pb.StreamFrame, 256),
 		done:             make(chan struct{}),
@@ -189,11 +193,17 @@ func (p *Peer) SendVoiceFrame(callUUID string, frameData []byte) error {
 	}
 }
 
-// RegisterISSI adds an ISSI to this peer's remote registry.
-func (p *Peer) RegisterISSI(issi uint32) {
+// RegisterISSI adds an ISSI to this peer's remote registry. origin is the
+// server where the subscriber is physically attached (Control.origin from
+// the SubscriberUpdate). If empty, peer.Name is used — the right fallback
+// for the SyncResponse path, where the peer only ships its own locals.
+func (p *Peer) RegisterISSI(issi uint32, origin string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.issis[issi] = true
+	if origin == "" {
+		origin = p.Name
+	}
+	p.issis[issi] = origin
 	// Eine erneute Register-Message ist ein "atomic replace" — alte
 	// GSSI-Affiliations fuer diese ISSI fliegen raus, das nachfolgende
 	// AffiliateISSI setzt die aktuelle Liste. Sonst akkumulieren alte
@@ -257,7 +267,8 @@ func (p *Peer) HasSubscribersOnGSSI(gssi uint32) bool {
 func (p *Peer) HasISSI(issi uint32) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.issis[issi]
+	_, ok := p.issis[issi]
+	return ok
 }
 
 // ISSIs returns a copy of all registered ISSIs.
@@ -267,6 +278,19 @@ func (p *Peer) ISSIs() []uint32 {
 	out := make([]uint32, 0, len(p.issis))
 	for issi := range p.issis {
 		out = append(out, issi)
+	}
+	return out
+}
+
+// Origins returns a copy of the ISSI -> origin map. Origin is the server
+// where each ISSI is physically attached, which may differ from peer.Name
+// when the peer is just relaying for a deeper hop in the mesh.
+func (p *Peer) Origins() map[uint32]string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[uint32]string, len(p.issis))
+	for issi, origin := range p.issis {
+		out[issi] = origin
 	}
 	return out
 }
@@ -291,7 +315,7 @@ func (p *Peer) Cleanup() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	count := len(p.issis)
-	p.issis = make(map[uint32]bool)
+	p.issis = make(map[uint32]string)
 	p.gssiAffiliations = make(map[uint32]map[uint32]bool)
 	p.logger.Printf("federation: cleaned up peer %s (%d ISSIs removed)", p.Name, count)
 }
