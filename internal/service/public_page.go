@@ -17,16 +17,16 @@ func (s *Service) registerPublicHandlers() {
 func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 	clients := s.server.SnapshotClients()
 
-	// Repeater count + subscriber count come from BlueStation telemetry (most accurate).
+	// TMO-site count + subscriber count come from BlueStation telemetry (most accurate).
 	// Falls back to heartbeat API for custom clients.
-	repeaterCount := 0
+	tmoSiteCount := 0
 	subscriberCount := 0
 	if s.telemetry != nil && s.telemetry.ActiveCount() > 0 {
-		repeaterCount = s.telemetry.ActiveCount()
+		tmoSiteCount = s.telemetry.ActiveCount()
 		subscriberCount = s.telemetry.TotalSubscribers()
-	} else if s.repeaters != nil {
-		repeaterCount = s.repeaters.ActiveCount()
-		subscriberCount = s.repeaters.TotalSubscribers()
+	} else if s.tmoSites != nil {
+		tmoSiteCount = s.tmoSites.ActiveCount()
+		subscriberCount = s.tmoSites.TotalSubscribers()
 	}
 	_ = clients
 
@@ -44,7 +44,7 @@ func (s *Service) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 		"server":      serverName,
 		"version":     "1.0",
 		"uptime":      time.Since(startTime).String(),
-		"repeaters":   repeaterCount,
+		"tmo_sites":   tmoSiteCount,
 		"subscribers": subscriberCount,
 		"positions":   len(positions),
 	})

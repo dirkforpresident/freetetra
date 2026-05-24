@@ -12,7 +12,7 @@ page, live view, map, and a setup guide for new operators are public.
 
 ## What it does
 
-- Brew protocol server for BlueStation repeaters and hotspots (binary WebSocket)
+- Brew protocol server for BlueStation TMO-sites and hotspots (binary WebSocket)
 - Server-to-server federation with mesh relay, TTL, deduplication, path tracking
 - RadioID auto-auth — any licensed amateur on [radioid.net](https://radioid.net)
   is accepted automatically, no manual allow-list
@@ -24,7 +24,7 @@ page, live view, map, and a setup guide for new operators are public.
 
 ## Requirements
 
-- BlueStation repeater or hotspot — see
+- BlueStation TMO-site or hotspot — see
   [MidnightBlueLabs/tetra-bluestation](https://github.com/MidnightBlueLabs/tetra-bluestation)
 - Linux server with public IP (VPS, home server with port forwarding, or HamNet node)
 - Go 1.24+ for building, or pre-built binary from releases
@@ -42,6 +42,28 @@ cp .env.example .env
 ```
 
 For a production setup with nginx + SSL + systemd: see [INSTALL.md](INSTALL.md).
+
+### Docker Compose with multiple env files
+
+`docker-compose.yml` supports a shared env file plus per-service env files.
+By default all services still read `.env`, so existing setups keep working.
+
+Use overrides when you want separate configs per service:
+
+```bash
+ENV_COMMON_FILE=.env.common \
+ENV_FREETETRA_FILE=.env.freetetra \
+ENV_WEBRADIO_FILE=.env.webradio \
+ENV_ECHO_FILE=.env.echo \
+docker compose up -d
+```
+
+If you only want one service-specific override, set just that variable.
+
+### Host routing used by this Docker setup
+
+- `http://free.tetra.cat:80` -> this machine `:8091` (main instance)
+- `http://free2.tetra.cat:80` -> this machine `:8092` (loopback test instance)
 
 ## BlueStation configuration
 
@@ -83,9 +105,23 @@ FreeTetra is an **open federation** with a **symmetric shared key**:
 FEDERATION_ENABLED=true
 FEDERATION_NAME=YOUR_CALLSIGN
 FEDERATION_KEY=freetetra-federation-2026
-FEDERATION_SELF_URL=wss://your-server.tld/peer/
-FEDERATION_PEERS=wss://freetetra.de/peer/
+FEDERATION_SELF_URL=free.tetra.cat:8102
+FEDERATION_PEERS=free2.tetra.cat:8202
 ```
+
+Federation transport is gRPC. Peer values are `host:port` targets.
+Use one HTTP/WS port and one gRPC port per instance.
+
+### NGINX on port 80
+
+If you run NGINX in front, expose both hostnames on public port `80` and route
+HTTP/WS plus federation gRPC to the correct internal backend ports.
+
+Ready-to-use config for your current two-host setup is in
+`docs/nginx-two-ports.conf`:
+
+- public `free.tetra.cat:80` -> internal main HTTP/WS `:8101` and gRPC `:8102`
+- public `free2.tetra.cat:80` -> internal loopback HTTP/WS `:8201` and gRPC `:8202`
 
 The key `freetetra-federation-2026` is **deliberately public** — anyone can join.
 If you want a **private mesh** (closed group, no connection to the public network),
@@ -229,6 +265,50 @@ CGO is required (h3-go uber/h3-go uses libh3). On macOS:
 
 ```bash
 brew install gcc
+```
+
+### Regenerate protobuf code
+
+```bash
+./scripts/gen-proto.sh
+```
+
+This regenerates both federation protobuf APIs:
+
+- `internal/federation/proto/federation.proto`
+- `internal/federation/proto/v2/federation_v2_draft.proto`
+
+### Federation loopback Docker test
+
+Run a 3-node federation test (`ft-a -> ft-b -> ft-c`) plus an echo loopback
+module behind `ft-c`. The test verifies that `ft-a` discovers `ft-c` via
+gossip through `ft-b`.
+
+```bash
+./tests/federation-loopback/run.sh
+```
+
+To keep the stack running for manual inspection:
+
+```bash
+KEEP_RUNNING=1 ./tests/federation-loopback/run.sh
+```
+
+### External free2.tetra.cat TG25 loopback test
+
+Run a local loopback federation node and attach an echo module on talkgroup 25.
+The loopback node is the `free2.tetra.cat` instance and attempts to federate
+to the main `free.tetra.cat` instance via federation RPC
+(`FEDERATION_PEERS=free.tetra.cat:8102`).
+
+```bash
+./tests/federation-freecat/run.sh
+```
+
+Optional overrides:
+
+```bash
+FREECAT_HOST=free.tetra.cat FREECAT_RPC_PORT=8102 KEEP_RUNNING=1 ./tests/federation-freecat/run.sh
 ```
 
 ## Configuration reference

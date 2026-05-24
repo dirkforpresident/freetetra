@@ -287,13 +287,13 @@ func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
 	totalSamples, uniqueIssis := s.coverageDB.Stats()
 	devices24h := s.coverageDB.Devices24h()
 
-	// Repeater-Stats aus dem stationStore (online = letzter Push < 15 min)
-	var repsOnline, repsTotal int
+	// TMO-Site-Stats aus dem stationStore (online = letzter Push < 15 min)
+	var sitesOnline, sitesTotal int
 	if s.stationStore != nil {
 		for _, st := range s.stationStore.All() {
-			repsTotal++
+			sitesTotal++
 			if st.Online(stationOnlineWindow) {
-				repsOnline++
+				sitesOnline++
 			}
 		}
 	}
@@ -305,8 +305,8 @@ func (s *Service) handleMapData(w http.ResponseWriter, r *http.Request) {
 			"total_samples":    totalSamples,
 			"unique_issis":     uniqueIssis,
 			"devices_24h":      devices24h,
-			"repeaters_online": repsOnline,
-			"repeaters_total":  repsTotal,
+			"tmo_sites_online": sitesOnline,
+			"tmo_sites_total":  sitesTotal,
 		},
 	})
 }
@@ -452,7 +452,7 @@ body.dark .theme-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #3
 <div class="header">
     <h1>Free<span>Tetra</span> Map</h1>
     <div class="info">
-        <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-repeaters">0/0</b> {{T:map.repeater}}</span>
+        <span class="stat-group"><span class="live-dot" id="online-dot"></span><b id="stat-tmo-sites">0/0</b> {{T:map.tmo_site}}</span>
         <span><b id="stat-devices">0</b> {{T:map.devices}}</span>
         <span class="filter-group" title="{{T:map.filter_title}}">
             <button class="filter-btn" data-days="7">7d</button>
@@ -677,9 +677,9 @@ async function loadHexes() {
         }
 
         const s = d.stats || {};
-        const online = s.repeaters_online ?? 0;
-        const total = s.repeaters_total ?? 0;
-        document.getElementById("stat-repeaters").textContent = online + "/" + total;
+        const online = s.tmo_sites_online ?? 0;
+        const total = s.tmo_sites_total ?? 0;
+        document.getElementById("stat-tmo-sites").textContent = online + "/" + total;
         document.getElementById("stat-devices").textContent = s.devices_24h ?? 0;
         document.getElementById("online-dot").classList.toggle("stale", online === 0);
 
@@ -693,12 +693,12 @@ async function loadHexes() {
     }
 }
 
-// --- FreeTetra stations (Repeater/Hotspot/BlueStation) ---
+// --- FreeTetra stations (TMO-Site/Hotspot/BlueStation) ---
 const stationLayer = L.layerGroup().addTo(map);
 
 function stationIcon(type, online) {
     const color = online ? "#10b981" : "#9ca3af";
-    const symbol = type === "hotspot" ? "H" : type === "repeater" ? "R" : "B";
+    const symbol = type === "hotspot" ? "H" : type === "tmo_site" ? "T" : "B";
     const html = '<div style="width:28px;height:28px;border-radius:50%;background:' + color +
         ';border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);color:#fff;font-weight:700;font-family:monospace;font-size:13px;display:flex;align-items:center;justify-content:center;">' + symbol + '</div>';
     return L.divIcon({ className: "station-icon", html, iconSize: [28, 28], iconAnchor: [14, 14] });
@@ -707,7 +707,7 @@ function stationIcon(type, online) {
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function stationPopup(st) {
-    const typeName = st.type === "hotspot" ? "Hotspot" : st.type === "repeater" ? "Repeater" : "BlueStation";
+    const typeName = st.type === "hotspot" ? "Hotspot" : st.type === "tmo_site" ? "TMO-Site" : "BlueStation";
     const dot = st.online ? '<span style="color:#10b981">&#9679; online</span>' : '<span style="color:#9ca3af">&#9675; offline</span>';
     const rows = [];
     rows.push("<b style='font-size:14px'>" + escapeHtml(st.callsign) + "</b> &middot; " + dot);
@@ -756,12 +756,12 @@ func (s *Service) handlePositionPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Repeater  string `json:"repeater"`
+		TMOSite   string `json:"tmo_site"`
 		Positions []struct {
-			ISSI     uint32  `json:"issi"`
-			Lat      float64 `json:"lat"`
-			Lon      float64 `json:"lon"`
-			Repeater string  `json:"repeater"`
+			ISSI    uint32  `json:"issi"`
+			Lat     float64 `json:"lat"`
+			Lon     float64 `json:"lon"`
+			TMOSite string  `json:"tmo_site"`
 		} `json:"positions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -772,13 +772,13 @@ func (s *Service) handlePositionPush(w http.ResponseWriter, r *http.Request) {
 		if p.ISSI == 0 {
 			continue
 		}
-		rep := p.Repeater
-		if rep == "" {
-			rep = req.Repeater
+		site := p.TMOSite
+		if site == "" {
+			site = req.TMOSite
 		}
 		s.positionStore.Update(p.ISSI, p.Lat, p.Lon)
 		if s.coverageDB != nil {
-			_ = s.coverageDB.Insert(p.ISSI, p.Lat, p.Lon, nil, nil, rep)
+			_ = s.coverageDB.Insert(p.ISSI, p.Lat, p.Lon, nil, nil, site)
 		}
 		if s.aprsBridge != nil {
 			go s.aprsBridge.SendPosition(p.ISSI, p.Lat, p.Lon)
@@ -822,12 +822,12 @@ func (s *Service) processSDSForPosition(sourceISSI uint32, sdsData []byte) {
 	if !ok {
 		return
 	}
-	// Repeater-Tag = lokaler Server-Name (FEDERATION_NAME). Bei Federation-
+	// TMO-Site-Tag = lokaler Server-Name (FEDERATION_NAME). Bei Federation-
 	// incoming Samples wird der Peer-Name als Tag verwendet.
-	repeater := s.cfg.Federation.Name
+	tmoSite := s.cfg.Federation.Name
 	s.positionStore.Update(sourceISSI, lat, lon)
 	if s.coverageDB != nil {
-		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil, repeater)
+		_ = s.coverageDB.Insert(sourceISSI, lat, lon, nil, nil, tmoSite)
 	}
 	s.recordActivity("position",
 		fmt.Sprintf("ISSI=%d lat=%.4f lon=%.4f", sourceISSI, lat, lon),
@@ -836,7 +836,7 @@ func (s *Service) processSDSForPosition(sourceISSI uint32, sdsData []byte) {
 
 	// Federation-Sync: an alle Peers schicken
 	if s.federation != nil {
-		s.federation.NotifyPositionSample(sourceISSI, lat, lon, repeater)
+		s.federation.NotifyPositionSample(sourceISSI, lat, lon, tmoSite)
 	}
 
 	// Forward to APRS-IS

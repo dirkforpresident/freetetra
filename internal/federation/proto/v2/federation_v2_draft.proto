@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package freetetra.federation.v2;
+
+option go_package = "github.com/freetetra/server/internal/federation/proto/federationv2pb;federationv2pb";
+
+import "google/protobuf/struct.proto";
+
+// FederationTransportV2 is a typed successor to the v1 envelope transport.
+//
+// Notes:
+// - One bidi stream carries both control and voice traffic.
+// - Authentication metadata can remain transport-level (headers/metadata),
+//   while payload semantics are strongly typed.
+service FederationTransportV2 {
+  rpc Connect(stream StreamFrame) returns (stream StreamFrame);
+}
+
+// StreamFrame is the top-level stream item.
+message StreamFrame {
+  oneof body {
+    Control control = 1;
+    VoiceFrame voice_frame = 2;
+  }
+}
+
+// Control wraps all non-voice federation messages and carries common
+// mesh-routing fields.
+message Control {
+  // Server name that originated this message.
+  string origin = 1;
+
+  // Protocol version announced by sender (for hello/capability checks).
+  uint32 protocol_version = 2;
+
+  // Mesh routing / deduplication fields.
+  string msg_id = 3;
+  int32 ttl = 4;
+  repeated string path = 5;
+
+  oneof payload {
+    Hello hello = 10;
+    SubscriberUpdate subscriber_update = 11;
+    AffiliateUpdate affiliate_update = 12;
+    CallStart call_start = 13;
+    CallEnd call_end = 14;
+    SdsRelay sds_relay = 15;
+    SyncRequest sync_request = 16;
+    SyncResponse sync_response = 17;
+    PeerExchange peer_exchange = 18;
+    UsersDbOffer users_db_offer = 19;
+    UsersDbRequest users_db_request = 20;
+    PositionSample position_sample = 21;
+    StationUpdate station_update = 22;
+  }
+}
+
+// Hello carries handshake metadata.
+message Hello {
+  // Optional UDP voice parameters for deployments that still use UDP-plane.
+  string udp_addr = 1;
+  string udp_token = 2;
+}
+
+message SubscriberUpdate {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_REGISTER = 1;
+    ACTION_DEREGISTER = 2;
+  }
+
+  uint32 issi = 1;
+  Action action = 2;
+
+  // Current affiliations for ACTION_REGISTER.
+  repeated uint32 gssis = 3;
+}
+
+message AffiliateUpdate {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_AFFILIATE = 1;
+    ACTION_DEAFFILIATE = 2;
+  }
+
+  uint32 issi = 1;
+  Action action = 2;
+  repeated uint32 gssis = 3;
+}
+
+message CallStart {
+  string uuid = 1;
+  uint32 source_issi = 2;
+  uint32 dest_gssi = 3;
+  uint32 priority = 4;
+  uint32 service = 5;
+}
+
+message CallEnd {
+  string uuid = 1;
+  uint32 cause = 2;
+}
+
+message VoiceFrame {
+  // UUID string form for 1:1 compatibility with existing code path.
+  string call_uuid = 1;
+  bytes frame_data = 2;
+}
+
+message SdsRelay {
+  uint32 source_issi = 1;
+  uint32 dest_issi = 2;
+
+  // Raw SDS payload bytes (preferred over hex string in v1).
+  bytes sds_data = 3;
+}
+
+message SyncRequest {}
+
+message SyncSubscriber {
+  repeated uint32 gssis = 1;
+  string callsign = 2;
+}
+
+message SyncResponse {
+  // Keyed by decimal ISSI string for direct parity with current map shape.
+  map<string, SyncSubscriber> subscribers = 1;
+}
+
+message GossipPeer {
+  string name = 1;
+  string url = 2;
+}
+
+message PeerExchange {
+  repeated GossipPeer peers = 1;
+}
+
+message UsersDbOffer {
+  string timestamp = 1;
+  string url = 2;
+  uint32 count = 3;
+}
+
+message UsersDbRequest {}
+
+message PositionSample {
+  uint32 issi = 1;
+  double lat = 2;
+  double lon = 3;
+  string tmo_site = 4;
+}
+
+message StationUpdate {
+  // Kept dynamic to match existing station map payload.
+  google.protobuf.Struct station = 1;
+}

@@ -1,0 +1,51 @@
+services:
+  ft-a:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-loop-ft-a
+    env_file:
+      - .env.ft-a
+    ports:
+      - "18091:8091"
+    restart: unless-stopped
+
+  ft-b:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-loop-ft-b
+    env_file:
+      - .env.ft-b
+    ports:
+      - "28091:8091"
+    restart: unless-stopped
+
+  ft-c:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-loop-ft-c
+    env_file:
+      - .env.ft-c
+    ports:
+      - "38091:8091"
+    restart: unless-stopped
+
+  loopback-echo:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ft-loop-echo
+    entrypoint: ["/app/tetra-brew-echo"]
+    environment:
+      BREW_MODE: echo
+      BREW_CLIENT_BASE_URL: http://ft-c:8091
+      BREW_CLIENT_USERNAME: loopback
+      BREW_CLIENT_PASSWORD: loopbackpass
+      ECHO_TALKGROUP: "10002"
+      ECHO_SOURCE_ISSI: "899002"
+      ECHO_PLAYBACK_DELAY: "300ms"
+    depends_on:
+      - ft-c
+    restart: unless-stopped

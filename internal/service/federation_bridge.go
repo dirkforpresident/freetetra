@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,13 +31,60 @@ func newFederationBridge(cfg config.Config, logger *log.Logger, svc *Service) *f
 		logger: logger,
 		svc:    svc,
 	}
-	fb.hub = federation.NewHub(cfg.Federation.Name, cfg.Federation.Key, cfg.Federation.SelfURL, fb, logger)
-	if cfg.Federation.UDPPort > 0 {
-		if err := fb.hub.EnableUDPVoice(cfg.Federation.UDPPort, cfg.Federation.UDPAdvAddr); err != nil {
-			logger.Printf("federation: UDP voice disabled (%v) — falling back to TCP WS for voice", err)
-		}
+	fb.hub = federation.NewHub(
+		cfg.Federation.Name,
+		cfg.Federation.Key,
+		cfg.Federation.SelfURL,
+		cfg.Federation.RPCListenAddr,
+		fb,
+		logger,
+	)
+	if sameListenerEndpoint(cfg.HTTPListenAddr, cfg.Federation.RPCListenAddr) {
+		svc.server.SetGRPCServer(fb.hub.NewGRPCServer())
+		fb.hub.UseSharedPortRPC()
+		logger.Printf("federation: multiplexing HTTP, APIs and gRPC on %s", cfg.HTTPListenAddr)
 	}
 	return fb
+}
+
+func sameListenerEndpoint(httpAddr, rpcAddr string) bool {
+	hHost, hPort, ok := splitListenAddr(httpAddr)
+	if !ok {
+		return false
+	}
+	rHost, rPort, ok := splitListenAddr(rpcAddr)
+	if !ok || hPort != rPort {
+		return false
+	}
+	return hostsEquivalent(hHost, rHost)
+}
+
+func splitListenAddr(addr string) (string, string, bool) {
+	a := strings.TrimSpace(addr)
+	if a == "" {
+		return "", "", false
+	}
+	host, port, err := net.SplitHostPort(a)
+	if err != nil {
+		if strings.HasPrefix(a, ":") {
+			return "", strings.TrimPrefix(a, ":"), true
+		}
+		return "", "", false
+	}
+	return host, port, true
+}
+
+func hostsEquivalent(a, b string) bool {
+	normalize := func(host string) string {
+		h := strings.TrimSpace(strings.ToLower(host))
+		switch h {
+		case "", "0.0.0.0", "::", "[::]":
+			return "*"
+		default:
+			return h
+		}
+	}
+	return normalize(a) == normalize(b)
 }
 
 func (fb *federationBridge) start(ctx context.Context) {
@@ -48,9 +97,6 @@ func (fb *federationBridge) start(ctx context.Context) {
 			Key:  fb.cfg.Federation.Key,
 		})
 	}
-
-	// Register HTTP handler for incoming peer connections
-	fb.svc.server.RegisterHTTPHandler("/peer/", fb.hub.HandleIncoming)
 
 	// Start outgoing peer connections
 	fb.hub.Start(ctx, peers)
@@ -212,16 +258,16 @@ func (fb *federationBridge) OnPeerStationUpdate(peerName string, stationMap map[
 // OnPeerPositionSample wird vom Federation-Hub aufgerufen, wenn ein Peer
 // einen Position-Sample meldet (Coverage-Federation). Wir speichern den
 // Sample in der lokalen Coverage-DB damit unsere Map die Gesamt-Welt zeigt.
-func (fb *federationBridge) OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, repeater string) {
+func (fb *federationBridge) OnPeerPositionSample(peerName string, issi uint32, lat, lon float64, tmoSite string) {
 	if fb.svc.coverageDB == nil {
 		return
 	}
-	// Repeater-Tag = der Server-Name der den Sample empfangen hat. Wenn der
-	// Origin-Repeater leer war, fallback auf peer-Name.
-	if repeater == "" {
-		repeater = peerName
+	// TMO-Site-Tag = der Server-Name der den Sample empfangen hat. Wenn der
+	// Origin-Tag leer war, fallback auf peer-Name.
+	if tmoSite == "" {
+		tmoSite = peerName
 	}
-	_ = fb.svc.coverageDB.Insert(issi, lat, lon, nil, nil, repeater)
+	_ = fb.svc.coverageDB.Insert(issi, lat, lon, nil, nil, tmoSite)
 	if fb.svc.positionStore != nil {
 		fb.svc.positionStore.Update(issi, lat, lon)
 	}
@@ -288,11 +334,11 @@ func (fb *federationBridge) NotifySubscriberUpdate(issi uint32, action string, g
 
 // NotifyPositionSample sendet einen empfangenen LIP-Sample (lat/lon) an alle
 // Federation-Peers — fuer geteilte Coverage-Map.
-func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, repeater string) {
+func (fb *federationBridge) NotifyPositionSample(issi uint32, lat, lon float64, tmoSite string) {
 	if fb.hub == nil {
 		return
 	}
-	fb.hub.BroadcastPositionSample(issi, lat, lon, repeater)
+	fb.hub.BroadcastPositionSample(issi, lat, lon, tmoSite)
 }
 
 // NotifyStationUpdate broadcasted einen BlueStation-Heartbeat an alle Peers.
@@ -352,4 +398,3 @@ func (fb *federationBridge) PeerSnapshots() []federation.PeerSnapshot {
 	}
 	return fb.hub.PeerSnapshots()
 }
-

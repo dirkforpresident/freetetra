@@ -70,9 +70,9 @@ CREATE INDEX IF NOT EXISTS idx_samples_issi ON samples(issi);
 	return &CoverageDB{db: db, logger: logger}, nil
 }
 
-// Insert adds a position sample. `repeater` is the callsign of the station
+// Insert adds a position sample. `tmoSite` is the callsign of the TMO-site
 // that heard it (may be empty for anonymous / unknown sources).
-func (cdb *CoverageDB) Insert(issi uint32, lat, lon float64, rssi, snr *int, repeater string) error {
+func (cdb *CoverageDB) Insert(issi uint32, lat, lon float64, rssi, snr *int, tmoSite string) error {
 	cdb.mu.Lock()
 	defer cdb.mu.Unlock()
 
@@ -99,8 +99,8 @@ func (cdb *CoverageDB) Insert(issi uint32, lat, lon float64, rssi, snr *int, rep
 	}
 
 	var rep sql.NullString
-	if repeater != "" {
-		rep = sql.NullString{String: repeater, Valid: true}
+	if tmoSite != "" {
+		rep = sql.NullString{String: tmoSite, Valid: true}
 	}
 
 	_, err = cdb.db.Exec(
@@ -117,10 +117,10 @@ type HexAggregation struct {
 	Lon        float64  `json:"lon"`
 	Count      int      `json:"n"`
 	AvgRSSI    *int     `json:"rssi,omitempty"`
-	IssiSet    int      `json:"u"`  // unique ISSIs
+	IssiSet    int      `json:"u"` // unique ISSIs
 	Resolution int      `json:"r"`
-	LastTs     int64    `json:"t"`  // most recent sample, unix seconds
-	Repeaters  []string `json:"rp,omitempty"`
+	LastTs     int64    `json:"t"` // most recent sample, unix seconds
+	TMOSites   []string `json:"rp,omitempty"`
 }
 
 // AggregateHexes returns hexagon aggregates for the given resolution.
@@ -206,7 +206,7 @@ FROM samples
 		if reps.Valid && reps.String != "" {
 			for _, r := range strings.Split(reps.String, ",") {
 				if r = strings.TrimSpace(r); r != "" {
-					agg.Repeaters = append(agg.Repeaters, r)
+					agg.TMOSites = append(agg.TMOSites, r)
 				}
 			}
 		}

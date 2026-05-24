@@ -143,6 +143,7 @@ func (b *WebRadioBridge) runSession(ctx context.Context) error {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
+	b.logger.Printf("webradio session %s: ffmpeg and encoder started", callID.String()[:8])
 	go b.logCommandOutput("webradio ffmpeg", ffmpegErr)
 	go b.logCommandOutput("webradio encoder", encoderErr)
 
@@ -165,6 +166,7 @@ func (b *WebRadioBridge) runSession(ctx context.Context) error {
 	copyErr := <-copyErrCh
 	ffmpegWaitErr := ffmpegCmd.Wait()
 	encoderWaitErr := encoderCmd.Wait()
+
 	if callStarted && activeCallID != uuid.Nil {
 		b.plane.ReleaseInjectedCall("webradio", activeCallID, b.cfg.WebRadio.ReleaseCause)
 	}
@@ -172,16 +174,22 @@ func (b *WebRadioBridge) runSession(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return context.Canceled
 	}
+
+	// Log detailed diagnostics when session fails
 	if readErr != nil {
+		b.logger.Printf("webradio session %s: frame read error: %v", callID.String()[:8], readErr)
 		return fmt.Errorf("read encoded frames: %w", readErr)
 	}
 	if copyErr != nil {
+		b.logger.Printf("webradio session %s: ffmpeg->encoder pipe error: %v", callID.String()[:8], copyErr)
 		return fmt.Errorf("pipe ffmpeg->encoder: %w", copyErr)
 	}
-	if ffmpegWaitErr != nil {
+	if ffmpegWaitErr != nil && !strings.Contains(ffmpegWaitErr.Error(), "context canceled") {
+		b.logger.Printf("webradio session %s: ffmpeg exited unexpectedly: %v", callID.String()[:8], ffmpegWaitErr)
 		return fmt.Errorf("ffmpeg exit: %w", ffmpegWaitErr)
 	}
-	if encoderWaitErr != nil {
+	if encoderWaitErr != nil && !strings.Contains(encoderWaitErr.Error(), "context canceled") {
+		b.logger.Printf("webradio session %s: encoder exited unexpectedly: %v", callID.String()[:8], encoderWaitErr)
 		return fmt.Errorf("encoder exit: %w", encoderWaitErr)
 	}
 	return nil
@@ -196,6 +204,7 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 	activeCallID := uuid.Nil
 	callStarted := false
 	frameInCall := 0
+	lastFrameTime := time.Now()
 
 	for {
 		if ctx.Err() != nil {
@@ -204,10 +213,22 @@ func (b *WebRadioBridge) readEncoderFrames(ctx context.Context, callID uuid.UUID
 		_, err := io.ReadFull(reader, frame)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				if !callStarted {
+					b.logger.Printf("webradio session %s: stream ended (no frames produced)", callID.String()[:8])
+				}
 				return activeCallID, callStarted, nil
 			}
+			b.logger.Printf("webradio session %s: frame read failed after %v: %v", callID.String()[:8], time.Since(lastFrameTime), err)
 			return activeCallID, callStarted, err
 		}
+
+		// Monitor time between frames to detect stalls
+		now := time.Now()
+		timeSinceLastFrame := now.Sub(lastFrameTime)
+		if timeSinceLastFrame > 5*time.Second {
+			b.logger.Printf("webradio session %s: frame stall detected (%.1fs since last frame)", callID.String()[:8], timeSinceLastFrame.Seconds())
+		}
+		lastFrameTime = now
 
 		ste, ready, err := normalizeRadioFrame(frame, &pendingCodec18)
 		if err != nil {
