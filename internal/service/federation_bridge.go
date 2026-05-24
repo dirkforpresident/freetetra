@@ -201,11 +201,19 @@ func (fb *federationBridge) OnPeerPrivateCallStart(peerName string, callUUID str
 		return
 	}
 
+	// Private (subscriber-to-subscriber) calls are duplex by TETRA convention:
+	// CMCE on the destination BS will only emit a duplex D-SETUP if the inbound
+	// CircularCallPayload has Duplex=1. The federation v2 CallStart proto
+	// currently doesn't carry the duplex/method/communication flags across
+	// the wire, so we set them here based on the call being a private call.
+	// Mirrors the same value the SIP bridge uses for its outbound P2P legs
+	// (sip_bridge.go: Duplex=1).
 	wire := brew.BuildSetupRequest(uid, brew.CircularCallPayload{
 		Source:      sourceISSI,
 		Destination: destISSI,
 		Priority:    priority,
 		Service:     uint8(service),
+		Duplex:      1,
 	})
 	n := fb.svc.server.BroadcastToSubscriber(destISSI, wire, "")
 	fb.logger.Printf("federation: relayed private SETUP from %s ISSI=%d->ISSI=%d to %d local clients", peerName, sourceISSI, destISSI, n)
