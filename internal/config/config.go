@@ -21,6 +21,7 @@ type Config struct {
 	WebRadio   WebRadioConfig
 	Zello      ZelloConfig
 	Echo       EchoConfig
+	Proxy      ProxyConfig
 	RadioID    RadioIDConfig
 	APRS       APRSConfig
 	MOTD       MOTDConfig
@@ -191,6 +192,14 @@ type EchoConfig struct {
 	MaxFrames     int
 }
 
+type ProxyConfig struct {
+	BridgeISSI    uint32
+	TargetISSI    uint32
+	DialTimeout   time.Duration
+	IdleTimeout   time.Duration
+	MaxConcurrent int
+}
+
 func LoadFromEnv() (Config, error) {
 	_ = loadDotEnv(".env")
 
@@ -356,10 +365,17 @@ func LoadFromEnv() (Config, error) {
 			ReleaseCause:  uint8(envInt("ECHO_RELEASE_CAUSE", 0)),
 			MaxFrames:     envInt("ECHO_MAX_FRAMES", 2000),
 		},
+		Proxy: ProxyConfig{
+			BridgeISSI:    uint32(envInt("PROXY_BRIDGE_ISSI", 0)),
+			TargetISSI:    uint32(envInt("PROXY_TARGET_ISSI", 0)),
+			DialTimeout:   envDuration("PROXY_DIAL_TIMEOUT", 10*time.Second),
+			IdleTimeout:   envDuration("PROXY_IDLE_TIMEOUT", 60*time.Second),
+			MaxConcurrent: envInt("PROXY_MAX_CONCURRENT", 4),
+		},
 	}
 
 	switch cfg.BrewMode {
-	case "server", "hybrid", "client", "router", "webradio", "zello", "echo", "dmrbridge":
+	case "server", "hybrid", "client", "router", "webradio", "zello", "echo", "dmrbridge", "proxy":
 	default:
 		return cfg, fmt.Errorf("invalid BREW_MODE=%q", cfg.BrewMode)
 	}

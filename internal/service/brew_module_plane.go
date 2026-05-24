@@ -377,6 +377,32 @@ func (p *BrewModulePlane) ReleaseInjectedCall(_ string, callID uuid.UUID, cause 
 	_ = p.enqueue(brew.BuildCallRelease(callID, cause))
 }
 
+func (p *BrewModulePlane) SendSetupRequest(callID uuid.UUID, source, dest uint32) bool {
+	return p.enqueue(brew.BuildSetupRequest(callID, brew.CircularCallPayload{
+		Source:      source,
+		Destination: dest,
+	}))
+}
+
+func (p *BrewModulePlane) SendSetupAccept(callID uuid.UUID) bool {
+	return p.enqueue(brew.BuildSetupAccept(callID))
+}
+
+func (p *BrewModulePlane) SendSetupReject(callID uuid.UUID, cause uint8) bool {
+	return p.enqueue(brew.BuildSetupReject(callID, cause))
+}
+
+func (p *BrewModulePlane) SendConnectRequest(callID uuid.UUID, source, dest uint32) bool {
+	return p.enqueue(brew.BuildConnectRequest(callID, brew.CircularCallPayload{
+		Source:      source,
+		Destination: dest,
+	}))
+}
+
+func (p *BrewModulePlane) SendCallRelease(callID uuid.UUID, cause uint8) bool {
+	return p.enqueue(brew.BuildCallRelease(callID, cause))
+}
+
 func (p *BrewModulePlane) InjectedVoiceFrame(_ string, callID uuid.UUID, data []byte) {
 	ste, err := normalizeTrafficSTE(data)
 	if err != nil {
