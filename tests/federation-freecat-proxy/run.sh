@@ -7,8 +7,11 @@ set -euo pipefail
 # ISSI 500 against this loopback node, the proxy routes the outbound leg to
 # ISSI 2627943 (configurable via env at the bottom of this script).
 #
-# Run alongside the original federation-freecat stack: this rig uses
-# project name ft-freecat-proxy-test and host ports 8301/8302.
+# This rig uses the same host ports (8201/8202) as the original
+# federation-freecat stack — the two CANNOT run simultaneously. Stop one
+# before starting the other (or run `docker compose down` on whichever is
+# up). Project name is ft-freecat-proxy-test to keep the container state
+# separate from federation-freecat's project.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR="$ROOT_DIR/tests/federation-freecat-proxy"

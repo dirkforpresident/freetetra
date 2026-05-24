@@ -7,8 +7,8 @@ services:
     env_file:
       - .env.loopback-node
     ports:
-      - "8301:8201"
-      - "8302:8202"
+      - "8201:8201"
+      - "8202:8202"
     restart: unless-stopped
 
   loopback-echo:
