@@ -3,9 +3,11 @@ set -euo pipefail
 
 # Variant of tests/federation-freecat that adds a proxy-bridge sidecar.
 #
-# The proxy reacts as ISSI 500: when a subscriber places a private call to
-# ISSI 500 against this loopback node, the proxy routes the outbound leg to
-# ISSI 2627943 (configurable via env at the bottom of this script).
+# The proxy reacts as ISSI 2635500 (fully-qualified form of TETRA short
+# number "500" under MCC/MNC 2635 — what the calling BS expands the short
+# number to before forwarding over Brew). When a subscriber places a
+# private call that resolves to 2635500, the proxy routes the outbound leg
+# to ISSI 2627943. Both ISSIs are configurable via env.
 #
 # This rig uses the same host ports (8201/8202) as the original
 # federation-freecat stack — the two CANNOT run simultaneously. Stop one
@@ -20,7 +22,7 @@ PROJECT="ft-freecat-proxy-test"
 KEEP_RUNNING="${KEEP_RUNNING:-0}"
 FREECAT_HOST="${FREECAT_HOST:-free.tetra.cat}"
 FREECAT_RPC_PORT="${FREECAT_RPC_PORT:-8102}"
-EXPECT_BRIDGE_ISSI="${PROXY_BRIDGE_ISSI:-500}"
+EXPECT_BRIDGE_ISSI="${PROXY_BRIDGE_ISSI:-2635500}"
 EXPECT_TARGET_ISSI="${PROXY_TARGET_ISSI:-2627943}"
 
 compose() {

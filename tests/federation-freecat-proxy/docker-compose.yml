@@ -49,7 +49,11 @@ services:
       - loopback-node
     restart: unless-stopped
 
-  # Proxy bridge: any subscriber dialing ISSI 500 gets routed to ISSI 2627943.
+  # Proxy bridge: any subscriber dialing ISSI 2635500 (fully-qualified form
+  # of short number "500" under MCC/MNC 2635) gets routed to ISSI 2627943.
+  # The bridge ISSI must match what the calling BS forwards over Brew —
+  # TETRA expands abbreviated short numbers with the network prefix before
+  # the U-SETUP reaches the brew network.
   loopback-proxy:
     build:
       context: ../..
@@ -61,7 +65,7 @@ services:
       BREW_CLIENT_BASE_URL: http://loopback-node:8201
       BREW_CLIENT_USERNAME: loopback
       BREW_CLIENT_PASSWORD: blafablafa
-      PROXY_BRIDGE_ISSI: "500"
+      PROXY_BRIDGE_ISSI: "2635500"
       PROXY_TARGET_ISSI: "2627943"
       PROXY_DIAL_TIMEOUT: "10s"
       PROXY_IDLE_TIMEOUT: "60s"
