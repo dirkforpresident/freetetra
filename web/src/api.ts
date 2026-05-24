@@ -62,6 +62,9 @@ export interface Station {
   last_seen: number;
   first_seen: number;
   online: boolean;
+  owned_issis?: number[];
+  origin?: string;
+  deleted?: number;
 }
 
 export interface StationsResponse {

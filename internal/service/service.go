@@ -158,7 +158,11 @@ func New(cfg config.Config, logger *log.Logger) (*Service, error) {
 	}
 
 	s.tmoSites = newTMOSiteHeartbeat()
-	s.stationStore = newStationStore(logger)
+	s.stationStore = newStationStore(logger, stationStoreConfig{
+		OnlineWindow: cfg.Station.OnlineWindow,
+		StaleAfter:   cfg.Station.StaleAfter,
+		ReapInterval: cfg.Station.ReapInterval,
+	})
 	s.registerDashboardHandlers()
 	s.registerPositionHandlers()
 	s.registerPublicHandlers()
@@ -215,6 +219,9 @@ func (s *Service) initBuiltInVirtualSDSRoutes() {
 func (s *Service) Run(ctx context.Context) error {
 	if s.federation != nil {
 		s.federation.start(ctx)
+	}
+	if s.stationStore != nil {
+		go s.stationStore.ReapLoop(ctx)
 	}
 	return s.server.Start(ctx)
 }

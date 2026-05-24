@@ -145,9 +145,10 @@ func (fb *federationBridge) syncAllSubscribers() {
 	}
 	// Stations mitsynchronisieren — falls ein Peer-Server neu connectet
 	// oder nach Netzaussetzer, kriegt er den aktuellen Stations-Stand.
+	// Tombstones MUST be included so deletes converge across the mesh.
 	stCount := 0
 	if fb.svc.stationStore != nil {
-		for _, st := range fb.svc.stationStore.All() {
+		for _, st := range fb.svc.stationStore.AllIncludingDeleted() {
 			st := st // copy
 			fb.NotifyStationUpdate(&st)
 			stCount++
@@ -358,8 +359,10 @@ func (fb *federationBridge) OnPeerVoiceFrame(peerName string, callUUID string, f
 
 // OnPeerStationUpdate wird vom Federation-Hub aufgerufen, wenn ein Peer einen
 // BlueStation-Heartbeat (Station-Push) weiterreicht. Wir uebernehmen die Station
-// in unseren lokalen stationStore.
-func (fb *federationBridge) OnPeerStationUpdate(peerName string, stationMap map[string]any) {
+// in unseren lokalen stationStore. `origin` is ctrl.Origin (the originating
+// peer name); `peerName` is the immediate sender (last-hop relay). We tag the
+// station with the originator so multi-hop relays don't lose attribution.
+func (fb *federationBridge) OnPeerStationUpdate(origin, peerName string, stationMap map[string]any) {
 	if fb.svc.stationStore == nil || stationMap == nil {
 		return
 	}
@@ -371,8 +374,16 @@ func (fb *federationBridge) OnPeerStationUpdate(peerName string, stationMap map[
 	if err := json.Unmarshal(b, &st); err != nil {
 		return
 	}
+	// Trust ctrl.Origin over any origin field the sender embedded — prevents
+	// a peer from spoofing another peer's attribution. Fall back to peerName
+	// for forward-compat with peers that don't set ctrl.Origin.
+	if origin != "" {
+		st.Origin = origin
+	} else if st.Origin == "" {
+		st.Origin = peerName
+	}
 	if _, err := fb.svc.stationStore.Upsert(st); err != nil {
-		fb.logger.Printf("federation: station upsert from %s failed: %v", peerName, err)
+		fb.logger.Printf("federation: station upsert from %s (origin=%s) failed: %v", peerName, st.Origin, err)
 	}
 }
 
