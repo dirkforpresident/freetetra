@@ -270,3 +270,48 @@ func TestBuildCalloutPayload_UsesFull8BitCalloutNumber(t *testing.T) {
 		t.Fatalf("callout_number=%d want=200", msg.CalloutNumber)
 	}
 }
+
+// TestParseSDSFrameEnvelope_UnwrappedHasZeroSource pins down the behaviour
+// that triggered the LIP-position regression: BlueStations typically send
+// SDS frames starting directly with the SDS-TL protocol ID, without the
+// 8-byte (source, destination) wrapper that parseSDSFrameEnvelope looks for.
+// In that case env.Source must come back as 0, which is why the SDS handler
+// in service.go has to fall back to the call context BEFORE invoking the
+// LIP hook.
+func TestParseSDSFrameEnvelope_UnwrappedHasZeroSource(t *testing.T) {
+	// A LIP short-report SDS frame starts with protocol ID 0x0A.
+	unwrapped := []byte{0x0A, 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE}
+	env := parseSDSFrameEnvelope(unwrapped)
+	if env.Wrapped {
+		t.Fatalf("expected unwrapped SDS to be detected as Wrapped=false, got Wrapped=true")
+	}
+	if env.Source != 0 || env.Destination != 0 {
+		t.Fatalf("unwrapped SDS must yield zero Source/Destination, got src=%d dst=%d", env.Source, env.Destination)
+	}
+	if len(env.Payload) != len(unwrapped) {
+		t.Fatalf("unwrapped payload must equal input, got %d want %d bytes", len(env.Payload), len(unwrapped))
+	}
+}
+
+// TestParseSDSFrameEnvelope_WrappedExtractsSource verifies the happy-path
+// wrapper detection still works (8 bytes of LE source/dest followed by a
+// recognisable SDS protocol ID).
+func TestParseSDSFrameEnvelope_WrappedExtractsSource(t *testing.T) {
+	var data []byte
+	data = binary.LittleEndian.AppendUint32(data, 2623563) // source
+	data = binary.LittleEndian.AppendUint32(data, 262999)  // destination
+	data = append(data, 0x0A, 0x00, 0x12, 0x34)            // LIP protocol ID + filler
+	env := parseSDSFrameEnvelope(data)
+	if !env.Wrapped {
+		t.Fatalf("expected wrapped SDS to be detected as Wrapped=true")
+	}
+	if env.Source != 2623563 {
+		t.Fatalf("source=%d want=2623563", env.Source)
+	}
+	if env.Destination != 262999 {
+		t.Fatalf("destination=%d want=262999", env.Destination)
+	}
+	if len(env.Payload) != 4 || env.Payload[0] != 0x0A {
+		t.Fatalf("payload incorrect, got % x", env.Payload)
+	}
+}

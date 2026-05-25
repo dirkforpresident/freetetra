@@ -606,6 +606,19 @@ func (s *Service) onVoiceFrameFromClient(client *brew.Client, m *brew.FrameMessa
 	source := env.Source
 	dest := env.Destination
 
+	// Most BlueStations send SDS without the 8-byte source/destination
+	// wrapper, so env.Source/env.Destination come back as 0. Resolve from
+	// the call context up front — otherwise the LIP hook below (and the
+	// callout relay) never see a non-zero source and silently drop.
+	if call != nil {
+		if source == 0 {
+			source = call.SourceISSI
+		}
+		if dest == 0 {
+			dest = call.DestinationGSI
+		}
+	}
+
 	// Check for LIP position reports
 	if m.FrameType == brew.FrameTypeSDSTransfer && source != 0 && len(payload) > 0 {
 		s.processSDSForPosition(source, payload)
@@ -622,12 +635,6 @@ func (s *Service) onVoiceFrameFromClient(client *brew.Client, m *brew.FrameMessa
 
 	destinationType := destinationTypeSubscriber
 	if call != nil {
-		if source == 0 {
-			source = call.SourceISSI
-		}
-		if dest == 0 {
-			dest = call.DestinationGSI
-		}
 		if call.DestinationType != "" {
 			destinationType = call.DestinationType
 		} else {
